@@ -1,8 +1,7 @@
-const express      = require('express');
-const cors         = require('cors');
-const helmet       = require('helmet');
-const cookieParser = require('cookie-parser');
-const morgan       = require('morgan');
+const express  = require('express');
+const cors     = require('cors');
+const helmet   = require('helmet');
+const morgan   = require('morgan');
 require('dotenv').config();
 
 const { validateEnvironment } = require('./config/envValidator');
@@ -42,16 +41,16 @@ const corsOptions = {
   origin(origin, cb) {
     const allowed = (process.env.FRONTEND_URL || '')
       .split(',')
-      .map(o => o.trim().replace(/\/$/, ''))   // strip trailing slash
+      .map(o => o.trim().replace(/\/$/, ''))
       .filter(Boolean);
 
-    if (!origin) return cb(null, true);          // server-to-server / curl / Postman
-    if (process.env.NODE_ENV !== 'production') return cb(null, true); // allow all in dev
+    if (!origin) return cb(null, true);
+    if (process.env.NODE_ENV !== 'production') return cb(null, true);
 
     const clean = origin.replace(/\/$/, '');
     if (allowed.includes(clean)) return cb(null, true);
 
-    console.warn(`[CORS] Blocked: ${origin} | Allowed: ${allowed.join(', ')}`);
+    console.warn(`[CORS] Blocked: ${origin}`);
     cb(new Error(`CORS blocked: ${origin}`));
   },
   credentials   : true,
@@ -60,13 +59,12 @@ const corsOptions = {
   maxAge        : 86400
 };
 
-// OPTIONS preflight MUST be handled before rate limiter and all other middleware
+// OPTIONS preflight before rate limiter and all other middleware
 app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
 
 // ── Core middleware ───────────────────────────────────────────
 app.use(globalLimiter);
-app.use(cookieParser(process.env.COOKIE_SECRET));
 
 // Webhook needs raw body BEFORE the JSON parser
 app.use('/api/voting/webhook', express.raw({ type: 'application/json' }));
@@ -94,9 +92,6 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ message });
 });
 
-// ── Export ────────────────────────────────────────────────────
-// Plain export — api/index.js does: const app = require('../app')
-// Do NOT change this to module.exports = { app } or index.js breaks.
 module.exports = app;
 
 if (require.main === module) {
