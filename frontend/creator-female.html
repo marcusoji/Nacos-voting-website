@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nominees — NACOS Awards 2026</title>
+  <link rel="stylesheet" href="style/main.css">
+</head>
+<body>
+<div class="page-wrap">
+
+  <div class="page-header container" style="padding-top:2rem;">
+    <div class="breadcrumb"><a href="categories.html">All Categories</a> <span>&#8250;</span> <span id="cat-name-bc">Loading&#8230;</span></div>
+    <h1 class="section-title" id="cat-title">Loading&#8230;</h1>
+    <p class="section-sub" id="cat-desc"></p>
+  </div>
+
+  <div class="container">
+    <div id="loading-state" style="text-align:center;padding:5rem 0;color:var(--text-muted);">
+      <div class="spinner" style="width:32px;height:32px;margin:0 auto 1rem;border-width:3px;"></div>
+      Loading nominees&#8230;
+    </div>
+    <div class="contestants-grid" id="contestants-grid" style="display:none;"></div>
+  </div>
+
+</div>
+
+<script src="app.js"></script>
+<script>
+function makeInitialAvatar(name) {
+  const initial = (name || '?').charAt(0).toUpperCase();
+  return `<div class="con-photo-placeholder">
+    <div style="width:80px;height:80px;border-radius:50%;background:var(--emerald-glow);border:2px solid var(--border-gold);display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',serif;font-size:2rem;font-weight:700;color:var(--gold);">${initial}</div>
+  </div>`;
+}
+
+async function initCategoryPage() {
+  const slug = window.location.pathname.split('/').pop().replace('.html', '');
+  try {
+    const r = await apiFetch(`/voting/categories/${slug}`);
+    if (!r.ok) throw new Error('Not found');
+    const { category, contestants } = r.data;
+
+    document.title = category.name + ' — NACOS Awards 2026';
+    document.getElementById('cat-title').textContent    = category.name;
+    document.getElementById('cat-name-bc').textContent  = category.name;
+    document.getElementById('cat-desc').textContent     = category.description || 'Cast your votes for the nominees below.';
+
+    const grid = document.getElementById('contestants-grid');
+    document.getElementById('loading-state').style.display = 'none';
+    grid.style.display = '';
+
+    if (!contestants || contestants.length === 0) {
+      grid.innerHTML = `
+        <div class="empty-state" style="grid-column:1/-1;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="6"/><path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.12"/></svg>
+          <p>No nominees added yet. Check back soon!</p>
+        </div>`;
+      return;
+    }
+
+    contestants.forEach((con, i) => {
+      const card = document.createElement('div');
+      card.className = 'con-card';
+      card.innerHTML = `
+        <div class="con-photo">
+          ${con.avatar_url
+            ? `<img src="${con.avatar_url}" alt="${con.fullname}" onerror="this.parentNode.innerHTML='${makeInitialAvatar(con.fullname).replace(/'/g,'\\\'')}';">`
+            : makeInitialAvatar(con.fullname)}
+          ${i < 3 ? `<div class="con-rank">#${i + 1}</div>` : ''}
+          <div class="con-votes-badge">${(con.vote_count || 0).toLocaleString()} votes</div>
+        </div>
+        <div class="con-body">
+          <div class="con-name">${con.fullname}</div>
+          <div class="con-bio">${con.bio || 'No bio provided.'}</div>
+          <button class="btn btn-gold btn-full"
+            onclick='openVoteModal(${JSON.stringify({ id: con.id, name: con.fullname, category: category.name, categoryId: category.id, avatarUrl: con.avatar_url || "" })})'>
+            Vote
+          </button>
+        </div>`;
+      grid.appendChild(card);
+    });
+  } catch(err) {
+    document.getElementById('loading-state').innerHTML = '<p style="color:var(--crimson)">Failed to load nominees. Please refresh.</p>';
+  }
+}
+
+function openVoteModal(con) {
+  if (window.VoteModal) VoteModal.open(con);
+}
+
+document.addEventListener('DOMContentLoaded', initCategoryPage);
+</script>
+</body>
+</html>

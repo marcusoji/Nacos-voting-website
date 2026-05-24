@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Moderator Dashboard — NACOS Awards 2026</title>
+  <link rel="stylesheet" href="style/main.css">
+</head>
+<body>
+<div class="page-wrap">
+  <div class="dash-layout">
+    <aside class="dash-sidebar">
+      <div class="dash-sidebar-title">Navigation</div>
+      <button class="dash-nav-item active" onclick="showPanel('contestants')" id="nav-contestants">
+        <span class="nav-icon">🧑</span> Contestants
+      </button>
+      <button class="dash-nav-item" onclick="showPanel('users')" id="nav-users">
+        <span class="nav-icon">👥</span> Users
+      </button>
+      <div class="divider" style="margin:1rem 0;"></div>
+      <button class="dash-nav-item" onclick="Auth.logout()">
+        <span class="nav-icon">🚪</span> Logout
+      </button>
+    </aside>
+
+    <main class="dash-main">
+      <div class="dash-header">
+        <div class="dash-title">Moderator <span class="text-gold">Dashboard</span></div>
+        <div class="dash-sub" id="mod-user-name"></div>
+      </div>
+
+      <!-- Contestants -->
+      <div id="panel-contestants">
+        <div class="dash-panel">
+          <div class="dash-panel-title">➕ Add Nominee</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+            <div class="form-group">
+              <label class="form-label">Category</label>
+              <select id="mod-cat" class="form-control" required></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Full Name</label>
+              <input type="text" id="mod-name" class="form-control" required placeholder="Contestant Name">
+            </div>
+            <div class="form-group" style="grid-column:1/-1;">
+              <label class="form-label">Photo</label>
+              <div class="upload-zone">
+                <input type="file" id="mod-photo-file" accept="image/*" onchange="handleModImageSelect(event)">
+                <div id="mod-upload-placeholder">
+                  <div class="upload-icon">📷</div>
+                  <div class="upload-label"><strong>Click or drag</strong> to upload a photo</div>
+                </div>
+                <div id="mod-upload-preview-wrap" style="display:none;">
+                  <img id="mod-upload-preview" class="upload-preview" style="display:block;">
+                  <div style="font-size:.8rem;color:var(--emerald-light);margin-top:.5rem;" id="mod-upload-filename"></div>
+                </div>
+                <div class="upload-progress" id="mod-upload-progress">
+                  <div class="upload-progress-bar" id="mod-upload-bar"></div>
+                </div>
+              </div>
+              <input type="hidden" id="mod-avatar-url">
+            </div>
+            <div class="form-group" style="grid-column:1/-1;">
+              <label class="form-label">Bio</label>
+              <textarea id="mod-bio" class="form-control" placeholder="Short bio…"></textarea>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-lg" id="mod-con-btn" onclick="createModContestant()" style="margin-top:.5rem;">Add Nominee</button>
+        </div>
+
+        <div class="dash-panel">
+          <div class="dash-panel-title">🧑 All Nominees</div>
+          <div class="ovf-x">
+            <table class="data-table">
+              <thead><tr><th>Photo</th><th>Name</th><th>Category</th><th>Votes</th></tr></thead>
+              <tbody id="mod-cons-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Users (read-only) -->
+      <div id="panel-users" style="display:none;">
+        <div class="dash-panel">
+          <div class="dash-panel-title">👥 Users</div>
+          <div class="ovf-x">
+            <table class="data-table">
+              <thead><tr><th>Name</th><th>Email</th><th>Matric</th><th>Role</th></tr></thead>
+              <tbody id="mod-users-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+// routeGuard() in app.js handles redirect for non-staff; checkSession() handles expiry
+const modUser = Auth.getUser();
+document.getElementById('mod-user-name').textContent = `Welcome, ${modUser?.fullname || 'Moderator'}`;
+
+function showPanel(name) {
+  document.getElementById('panel-contestants').style.display = name === 'contestants' ? '' : 'none';
+  document.getElementById('panel-users').style.display = name === 'users' ? '' : 'none';
+  document.getElementById('nav-contestants').classList.toggle('active', name === 'contestants');
+  document.getElementById('nav-users').classList.toggle('active', name === 'users');
+  if (name === 'users') loadModUsers();
+}
+
+let modFile = null;
+function handleModImageSelect(e) {
+  const file = e.target.files[0];
+  if (!file || file.size > 5*1024*1024) { Toast.error('Too large','Max 5MB'); return; }
+  modFile = file;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    document.getElementById('mod-upload-preview').src = ev.target.result;
+    document.getElementById('mod-upload-preview-wrap').style.display = 'block';
+    document.getElementById('mod-upload-placeholder').style.display = 'none';
+    document.getElementById('mod-upload-filename').textContent = file.name;
+    document.getElementById('mod-avatar-url').value = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+// BUG-14 FIX: ALL uploads go through backend — no Supabase credentials on frontend
+async function uploadImage(file, progressEl, barEl) {
+  if (progressEl) progressEl.style.display = 'block';
+  const token    = window.Auth?.getToken?.();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${window.API}/admin/upload-image`);
+    xhr.withCredentials = true;
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && barEl) barEl.style.width = Math.round(e.loaded / e.total * 100) + '%';
+    };
+
+    xhr.onload = () => {
+      if (barEl) { barEl.style.width = '100%'; setTimeout(() => { if (progressEl) progressEl.style.display='none'; if (barEl) barEl.style.width='0%'; }, 600); }
+      try {
+        const result = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300 && result.url) resolve(result.url);
+        else reject(new Error(result.message || `Upload failed (${xhr.status})`));
+      } catch { reject(new Error('Invalid server response')); }
+    };
+
+    xhr.onerror  = () => reject(new Error('Network error during upload'));
+    xhr.ontimeout = () => reject(new Error('Upload timed out'));
+    xhr.timeout  = 60000;
+    xhr.send(formData);
+  });
+}
+
+async function createModContestant() {
+  const btn = document.getElementById('mod-con-btn');
+  const name = document.getElementById('mod-name').value.trim();
+  const catId = document.getElementById('mod-cat').value;
+  let avatarUrl = document.getElementById('mod-avatar-url').value;
+
+  if (!name || !catId) { Toast.error('Required', 'Name and category are required.'); return; }
+  setLoading(btn, true);
+  try {
+    if (modFile && !avatarUrl) {
+      Toast.info('Uploading photo…');
+      avatarUrl = await uploadImage(modFile, document.getElementById('mod-upload-progress'), document.getElementById('mod-upload-bar'));
+      document.getElementById('mod-avatar-url').value = avatarUrl;
+    }
+    if (!avatarUrl) { Toast.error('Required','Please upload a photo.'); setLoading(btn,false,'Add Nominee'); return; }
+
+    const r = await apiFetch('/admin/contestants', {
+      method: 'POST',
+      body: JSON.stringify({ category_id: catId, fullname: name, avatar_url: avatarUrl, bio: document.getElementById('mod-bio').value.trim() })
+    });
+    if (r.ok) {
+      Toast.success('Nominee added!');
+      document.getElementById('mod-name').value = '';
+      document.getElementById('mod-bio').value = '';
+      document.getElementById('mod-avatar-url').value = '';
+      document.getElementById('mod-upload-preview-wrap').style.display = 'none';
+      document.getElementById('mod-upload-placeholder').style.display = 'block';
+      modFile = null;
+      loadModContestants();
+    } else Toast.error('Failed', r.data.message);
+  } catch(err) { Toast.error('Error', err.message); }
+  finally { setLoading(btn, false, 'Add Nominee'); }
+}
+
+async function loadModContestants() {
+  const r = await apiFetch('/admin/contestants');
+  if (!r.ok) return;
+  document.getElementById('mod-cons-body').innerHTML = (r.data.data||[]).map(c => `
+    <tr>
+      <td><img src="${c.avatar_url||''}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;"
+        onerror="this.style.display='none'"></td>
+      <td>${c.fullname}</td>
+      <td style="color:var(--text-muted);font-size:.82rem;">${c.categories?.name||'—'}</td>
+      <td>${(c.vote_count||0).toLocaleString()}</td>
+    </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">No nominees yet</td></tr>';
+}
+
+async function loadModUsers() {
+  const r = await apiFetch('/admin/users');
+  if (!r.ok) return;
+  document.getElementById('mod-users-body').innerHTML = (r.data.data||[]).map(u => `
+    <tr>
+      <td>${u.fullname||'—'}</td>
+      <td style="font-size:.82rem;">${u.email}</td>
+      <td style="font-size:.8rem;color:var(--text-muted);">${u.matric_number||'—'}</td>
+      <td><span class="badge badge-${u.role}">${u.role}</span></td>
+    </tr>`).join('');
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  const cats = await apiFetch('/voting/categories');
+  if (cats.ok) {
+    document.getElementById('mod-cat').innerHTML = cats.data.data.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  }
+  loadModContestants();
+});
+</script>
+</body>
+</html>

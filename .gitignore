@@ -1,0 +1,11 @@
+backend/node_modules/
+backend/.env
+.env.local
+.env.production
+.vercel/
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+frontend/js/app.js

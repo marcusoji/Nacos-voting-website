@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard — NACOS Awards 2026</title>
+  <link rel="stylesheet" href="style/main.css">
+  <style>
+    body { background: var(--bg); }
+    .dash-layout { display: grid; grid-template-columns: 220px 1fr; min-height: calc(100vh - 68px); }
+    @media(max-width:900px){ .dash-layout{ grid-template-columns:1fr; } .dash-sidebar{ display:none; } }
+    .panel-hidden { display: none !important; }
+  </style>
+</head>
+<body>
+<div class="page-wrap">
+<div class="dash-layout">
+
+  <!-- Sidebar -->
+  <aside class="dash-sidebar">
+    <div style="margin-bottom:2rem;">
+      <div class="dash-sidebar-title">Navigation</div>
+      <button class="dash-nav-item active" onclick="showPanel('analytics')" id="nav-analytics">
+        <span class="nav-icon">📊</span> Analytics
+      </button>
+      <button class="dash-nav-item" onclick="showPanel('categories')" id="nav-categories">
+        <span class="nav-icon">🏷️</span> Categories
+      </button>
+      <button class="dash-nav-item" onclick="showPanel('contestants')" id="nav-contestants">
+        <span class="nav-icon">🧑</span> Contestants
+      </button>
+      <button class="dash-nav-item" onclick="showPanel('users')" id="nav-users">
+        <span class="nav-icon">👥</span> Users
+      </button>
+      <button class="dash-nav-item" onclick="showPanel('transactions')" id="nav-transactions">
+        <span class="nav-icon">💳</span> Transactions
+      </button>
+    </div>
+    <div class="dash-sidebar-title">Account</div>
+    <button class="dash-nav-item" onclick="Auth.logout()">
+      <span class="nav-icon">🚪</span> Logout
+    </button>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="dash-main">
+    <div class="dash-header">
+      <div class="dash-title">Admin <span class="text-gold">Dashboard</span></div>
+      <div class="dash-sub" id="dash-user-name">Loading…</div>
+    </div>
+
+    <!-- ── Analytics Panel ── -->
+    <div id="panel-analytics">
+      <div class="metric-grid">
+        <div class="metric-card">
+          <div class="metric-icon">👥</div>
+          <div class="metric-val" id="m-users">—</div>
+          <div class="metric-lbl">Registered Users</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon">🗳️</div>
+          <div class="metric-val" id="m-votes">—</div>
+          <div class="metric-lbl">Total Votes</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon">💰</div>
+          <div class="metric-val" id="m-revenue" style="color:var(--emerald-light);">—</div>
+          <div class="metric-lbl">Total Revenue</div>
+        </div>
+      </div>
+
+      <div class="dash-panel">
+        <div class="dash-panel-title">📋 Recent Transactions</div>
+        <div class="ovf-x">
+          <table class="data-table" id="tx-table">
+            <thead>
+              <tr>
+                <th>Reference</th><th>Amount</th><th>Votes</th><th>Status</th><th>Date</th>
+              </tr>
+            </thead>
+            <tbody id="tx-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Categories Panel ── -->
+    <div id="panel-categories" class="panel-hidden">
+      <div class="dash-panel">
+        <div class="dash-panel-title">➕ Add Category</div>
+        <form onsubmit="createCategory(event)" style="display:grid;grid-template-columns:1fr 1fr auto;gap:1rem;align-items:end;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Name</label>
+            <input type="text" id="c-name" class="form-control" required placeholder="Entrepreneur of the Year">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Slug</label>
+            <input type="text" id="c-slug" class="form-control" required placeholder="entrepreneur">
+          </div>
+          <button type="submit" class="btn btn-primary" id="c-btn">Add</button>
+        </form>
+        <div class="form-group" style="margin-top:1rem;margin-bottom:0;">
+          <label class="form-label">Description (optional)</label>
+          <input type="text" id="c-desc" class="form-control" placeholder="Short description">
+        </div>
+      </div>
+      <div class="dash-panel">
+        <div class="dash-panel-title">🏷️ All Categories</div>
+        <div class="ovf-x">
+          <table class="data-table" id="cats-table">
+            <thead><tr><th>Name</th><th>Slug</th><th>Action</th></tr></thead>
+            <tbody id="cats-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Contestants Panel ── -->
+    <div id="panel-contestants" class="panel-hidden">
+      <div class="dash-panel">
+        <div class="dash-panel-title">➕ Add Nominee</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;" id="con-form-grid">
+          <div class="form-group">
+            <label class="form-label">Category</label>
+            <select id="con-cat" class="form-control" required></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Full Name</label>
+            <input type="text" id="con-name" class="form-control" required placeholder="Contestant Name">
+          </div>
+          <div class="form-group" style="grid-column:1/-1;">
+            <label class="form-label">Photo</label>
+            <div class="upload-zone" id="upload-zone">
+              <input type="file" id="con-photo-file" accept="image/*" onchange="handleImageSelect(event)">
+              <div id="upload-placeholder">
+                <div class="upload-icon">📷</div>
+                <div class="upload-label"><strong>Click or drag</strong> to upload a photo</div>
+                <div style="font-size:.75rem;color:var(--text-muted);margin-top:.3rem;">JPG, PNG, WEBP · Max 5MB</div>
+              </div>
+              <div id="upload-preview-wrap" style="display:none;">
+                <img id="upload-preview" class="upload-preview" style="display:block;">
+                <div style="font-size:.8rem;color:var(--emerald-light);margin-top:.5rem;" id="upload-filename"></div>
+              </div>
+              <div class="upload-progress" id="upload-progress">
+                <div class="upload-progress-bar" id="upload-bar"></div>
+              </div>
+            </div>
+            <input type="hidden" id="con-avatar-url">
+          </div>
+          <div class="form-group" style="grid-column:1/-1;">
+            <label class="form-label">Bio</label>
+            <textarea id="con-bio" class="form-control" placeholder="Short bio or description…"></textarea>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-lg" id="con-btn" onclick="createContestant()" style="margin-top:.5rem;">Add Nominee</button>
+      </div>
+
+      <div class="dash-panel">
+        <div class="dash-panel-title">🧑 All Nominees</div>
+        <div class="ovf-x">
+          <table class="data-table" id="cons-table">
+            <thead><tr><th>Photo</th><th>Name</th><th>Category</th><th>Votes</th><th>Actions</th></tr></thead>
+            <tbody id="cons-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Users Panel ── -->
+    <div id="panel-users" class="panel-hidden">
+      <div class="dash-panel">
+        <div class="dash-panel-title">👥 Registered Users</div>
+        <div class="ovf-x">
+          <table class="data-table" id="users-table">
+            <thead><tr><th>Name</th><th>Email</th><th>Matric</th><th>Role</th><th>Actions</th></tr></thead>
+            <tbody id="users-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Transactions Panel ── -->
+    <div id="panel-transactions" class="panel-hidden">
+      <div class="dash-panel">
+        <div class="dash-panel-title">💳 All Transactions</div>
+        <div class="ovf-x">
+          <table class="data-table" id="all-tx-table">
+            <thead><tr><th>Reference</th><th>Contestant</th><th>Category</th><th>Amount</th><th>Votes</th><th>Status</th><th>Date</th></tr></thead>
+            <tbody id="all-tx-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+</div>
+
+<script src="app.js"></script>
+<script>
+// ── Guard ──────────────────────────────────────────────────
+// routeGuard() in app.js handles redirect for non-admin; checkSession() handles expiry
+const currentUser = Auth.getUser();
+document.getElementById('dash-user-name').textContent = `Welcome, ${currentUser?.fullname || 'Admin'}`;
+
+// ── Panel switching ────────────────────────────────────────
+const PANELS = ['analytics','categories','contestants','users','transactions'];
+function showPanel(name) {
+  PANELS.forEach(p => {
+    document.getElementById(`panel-${p}`).classList.toggle('panel-hidden', p !== name);
+    document.getElementById(`nav-${p}`)?.classList.toggle('active', p === name);
+  });
+  if (name === 'analytics')    loadAnalytics();
+  if (name === 'categories')   loadCategories();
+  if (name === 'contestants')  { loadCategories(); loadContestants(); }
+  if (name === 'users')        loadUsers();
+  if (name === 'transactions') loadAllTransactions();
+}
+
+// ── Analytics ─────────────────────────────────────────────
+async function loadAnalytics() {
+  const r = await apiFetch('/admin/analytics');
+  if (!r.ok) return;
+  const { metrics, recentTransactions } = r.data;
+  document.getElementById('m-users').textContent    = (metrics.users||0).toLocaleString();
+  document.getElementById('m-votes').textContent    = (metrics.votes||0).toLocaleString();
+  document.getElementById('m-revenue').textContent  = '₦' + (metrics.revenue||0).toLocaleString();
+
+  const tbody = document.getElementById('tx-body');
+  tbody.innerHTML = (recentTransactions||[]).map(tx => `
+    <tr>
+      <td style="font-family:monospace;font-size:.78rem;">${tx.reference}</td>
+      <td>₦${(tx.amount||0).toLocaleString()}</td>
+      <td>${tx.quantity}</td>
+      <td><span class="badge badge-${tx.status}">${tx.status}</span></td>
+      <td>${new Date(tx.created_at).toLocaleDateString()}</td>
+    </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No transactions yet</td></tr>';
+}
+
+// ── Categories ────────────────────────────────────────────
+async function loadCategories() {
+  const r = await apiFetch('/voting/categories');
+  if (!r.ok) return;
+  const cats = r.data.data || [];
+
+  // Populate select
+  const sel = document.getElementById('con-cat');
+  if (sel) sel.innerHTML = cats.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+
+  const tbody = document.getElementById('cats-body');
+  if (!tbody) return;
+  tbody.innerHTML = cats.map(c => `
+    <tr>
+      <td>${c.name}</td>
+      <td style="font-family:monospace;font-size:.8rem;color:var(--text-muted);">${c.slug}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteCategory('${c.id}','${c.name}')">Delete</button></td>
+    </tr>`).join('') || '<tr><td colspan="3" style="text-align:center;">No categories</td></tr>';
+}
+
+async function createCategory(e) {
+  e.preventDefault();
+  const btn = document.getElementById('c-btn');
+  setLoading(btn, true);
+  const r = await apiFetch('/admin/categories', {
+    method: 'POST',
+    body: JSON.stringify({
+      name:        document.getElementById('c-name').value.trim(),
+      slug:        document.getElementById('c-slug').value.trim(),
+      description: document.getElementById('c-desc').value.trim()
+    })
+  });
+  setLoading(btn, false, 'Add');
+  if (r.ok) { Toast.success('Category added!'); loadCategories(); e.target.reset(); }
+  else Toast.error('Failed', r.data.message);
+}
+
+async function deleteCategory(id, name) {
+  if (!confirm(`Delete category "${name}"? This will also delete all its contestants.`)) return;
+  const r = await apiFetch(`/admin/categories/${id}`, { method: 'DELETE' });
+  if (r.ok) { Toast.success('Deleted'); loadCategories(); }
+  else Toast.error('Failed', r.data.message);
+}
+
+// ── Contestants ───────────────────────────────────────────
+let selectedFile = null;
+
+function handleImageSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { Toast.error('Too large', 'Max file size is 5MB.'); return; }
+  selectedFile = file;
+
+  const preview = document.getElementById('upload-preview');
+  const previewWrap = document.getElementById('upload-preview-wrap');
+  const placeholder = document.getElementById('upload-placeholder');
+  const filename = document.getElementById('upload-filename');
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    preview.src = ev.target.result;
+    previewWrap.style.display = 'block';
+    placeholder.style.display = 'none';
+    filename.textContent = file.name;
+    // Clear existing URL since new file selected
+    document.getElementById('con-avatar-url').value = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+// BUG-13 FIX: ALL uploads go through backend — no Supabase credentials on frontend
+async function uploadImageToSupabase(file) {
+  const progress = document.getElementById('upload-progress');
+  const bar      = document.getElementById('upload-bar');
+  if (progress) progress.style.display = 'block';
+
+  const token    = window.Auth?.getToken?.();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${window.API}/admin/upload-image`);
+    xhr.withCredentials = true;
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && bar) bar.style.width = Math.round(e.loaded / e.total * 100) + '%';
+    };
+
+    xhr.onload = () => {
+      if (bar) { bar.style.width = '100%'; setTimeout(() => { if (progress) progress.style.display = 'none'; if (bar) bar.style.width = '0%'; }, 600); }
+      try {
+        const result = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300 && result.url) resolve(result.url);
+        else reject(new Error(result.message || `Upload failed (${xhr.status})`));
+      } catch { reject(new Error('Invalid server response')); }
+    };
+
+    xhr.onerror  = () => reject(new Error('Network error during upload'));
+    xhr.ontimeout = () => reject(new Error('Upload timed out'));
+    xhr.timeout  = 60000;
+    xhr.send(formData);
+  });
+}
+
+async function loadContestants() {
+  const r = await apiFetch('/admin/contestants');
+  if (!r.ok) return;
+  const tbody = document.getElementById('cons-body');
+  tbody.innerHTML = (r.data.data||[]).map(c => `
+    <tr>
+      <td><img src="${c.avatar_url||''}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;background:var(--bg-3);"
+        onerror="this.style.display='none'"></td>
+      <td>${c.fullname}</td>
+      <td style="color:var(--text-muted);font-size:.82rem;">${c.categories?.name||'—'}</td>
+      <td>${(c.vote_count||0).toLocaleString()}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteContestant('${c.id}','${c.fullname}')">Remove</button></td>
+    </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No nominees yet</td></tr>';
+}
+
+async function createContestant() {
+  const btn = document.getElementById('con-btn');
+  const name = document.getElementById('con-name').value.trim();
+  const catId = document.getElementById('con-cat').value;
+  const bio = document.getElementById('con-bio').value.trim();
+  let avatarUrl = document.getElementById('con-avatar-url').value;
+
+  if (!name)  { Toast.error('Required', 'Please enter the contestant name.'); return; }
+  if (!catId) { Toast.error('Required', 'Please select a category.'); return; }
+
+  setLoading(btn, true);
+
+  try {
+    // Upload image if a file is selected
+    if (selectedFile && !avatarUrl) {
+      Toast.info('Uploading image…');
+      avatarUrl = await uploadImageToSupabase(selectedFile);
+      document.getElementById('con-avatar-url').value = avatarUrl;
+    }
+
+    if (!avatarUrl) { Toast.error('Required', 'Please upload a photo.'); setLoading(btn, false, 'Add Nominee'); return; }
+
+    const r = await apiFetch('/admin/contestants', {
+      method: 'POST',
+      body: JSON.stringify({ category_id: catId, fullname: name, avatar_url: avatarUrl, bio })
+    });
+
+    if (r.ok) {
+      Toast.success('Nominee added!', name + ' has been added.');
+      // Reset form
+      document.getElementById('con-name').value = '';
+      document.getElementById('con-bio').value = '';
+      document.getElementById('con-avatar-url').value = '';
+      document.getElementById('upload-preview-wrap').style.display = 'none';
+      document.getElementById('upload-placeholder').style.display = 'block';
+      selectedFile = null;
+      loadContestants();
+    } else {
+      Toast.error('Failed', r.data.message);
+    }
+  } catch(err) {
+    Toast.error('Upload Error', err.message);
+  } finally {
+    setLoading(btn, false, 'Add Nominee');
+  }
+}
+
+async function deleteContestant(id, name) {
+  if (!confirm(`Remove nominee "${name}"?`)) return;
+  const r = await apiFetch(`/admin/contestants/${id}`, { method: 'DELETE' });
+  if (r.ok) { Toast.success('Removed'); loadContestants(); }
+  else Toast.error('Failed', r.data.message);
+}
+
+// ── Users ─────────────────────────────────────────────────
+async function loadUsers() {
+  const r = await apiFetch('/admin/users');
+  if (!r.ok) return;
+  const tbody = document.getElementById('users-body');
+  tbody.innerHTML = (r.data.data||[]).map(u => `
+    <tr>
+      <td>${u.fullname||'—'}</td>
+      <td style="font-size:.82rem;">${u.email}</td>
+      <td style="font-size:.8rem;color:var(--text-muted);">${u.matric_number||'—'}</td>
+      <td><span class="badge badge-${u.role}">${u.role}</span></td>
+      <td>
+        ${u.role !== 'admin' ? `
+          <select class="form-control" style="padding:.25rem .5rem;font-size:.78rem;display:inline-block;width:auto;margin-right:.5rem;" onchange="updateRole('${u.id}',this.value)">
+            <option value="user" ${u.role==='user'?'selected':''}>User</option>
+            <option value="moderator" ${u.role==='moderator'?'selected':''}>Moderator</option>
+          </select>
+          <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${u.fullname}')">Delete</button>
+        ` : '<span style="color:var(--text-muted);font-size:.8rem;">Protected</span>'}
+      </td>
+    </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;">No users yet</td></tr>';
+}
+
+async function updateRole(id, role) {
+  const r = await apiFetch(`/admin/users/${id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) });
+  if (r.ok) Toast.success('Role updated');
+  else Toast.error('Failed', r.data.message);
+}
+
+async function deleteUser(id, name) {
+  if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+  const r = await apiFetch(`/admin/users/${id}`, { method: 'DELETE' });
+  if (r.ok) { Toast.success('User deleted'); loadUsers(); }
+  else Toast.error('Failed', r.data.message);
+}
+
+// ── Transactions ──────────────────────────────────────────
+async function loadAllTransactions() {
+  const r = await apiFetch('/admin/transactions');
+  if (!r.ok) return;
+  const tbody = document.getElementById('all-tx-body');
+  tbody.innerHTML = (r.data.data||[]).map(tx => `
+    <tr>
+      <td style="font-family:monospace;font-size:.75rem;">${tx.reference}</td>
+      <td>${tx.contestants?.fullname||'—'}</td>
+      <td style="font-size:.8rem;">${tx.categories?.name||'—'}</td>
+      <td>₦${(tx.amount||0).toLocaleString()}</td>
+      <td>${tx.quantity}</td>
+      <td><span class="badge badge-${tx.status}">${tx.status}</span></td>
+      <td style="font-size:.78rem;">${new Date(tx.created_at).toLocaleString()}</td>
+    </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">No transactions</td></tr>';
+}
+
+// ── Init ──────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  loadAnalytics();
+  // Auto-fill Supabase config if available
+  if (window.SUPABASE_URL) {
+    // Available from config
+  }
+});
+</script>
+</body>
+</html>

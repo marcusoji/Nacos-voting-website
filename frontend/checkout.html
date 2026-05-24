@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Checkout — NACOS Awards 2026</title>
+  <link rel="stylesheet" href="style/main.css">
+</head>
+<body>
+<div class="page-wrap">
+  <div class="checkout-wrap" style="padding-top:3rem;">
+    <div class="breadcrumb"><a href="categories.html">&larr; Continue Voting</a></div>
+    <h1 class="checkout-title">Your <span class="text-gold">Ballot</span></h1>
+
+    <div id="cart-empty" class="empty-state" style="display:none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      <p style="font-weight:600;margin-bottom:.5rem;">Your ballot is empty</p>
+      <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:1.5rem;">Add votes from any category to get started.</p>
+      <a href="categories.html" class="btn btn-primary">Browse Categories</a>
+    </div>
+
+    <div id="cart-content">
+      <div class="checkout-items" id="checkout-items"></div>
+
+      <div id="multi-note" style="display:none;background:rgba(201,161,74,.08);border:1px solid var(--border-gold);border-radius:var(--r);padding:.75rem 1rem;margin-bottom:1rem;font-size:.82rem;color:var(--gold);">
+        You have multiple nominees in your ballot. Each will be processed as a separate payment via Paystack.
+      </div>
+
+      <div class="checkout-summary">
+        <div class="checkout-total-row">
+          <span class="checkout-total-lbl">Total Amount</span>
+          <span class="checkout-total-val" id="checkout-total">&#8358;0</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email Address for Receipt</label>
+          <input type="email" id="checkout-email" class="form-control" placeholder="your@email.com">
+        </div>
+        <button class="btn btn-gold btn-full btn-lg" id="pay-btn" onclick="handlePayment()">
+          Pay with Paystack
+        </button>
+        <p style="text-align:center;font-size:.75rem;color:var(--text-muted);margin-top:.75rem;">
+          Secured by Paystack &middot; &#8358;100 per vote &middot; All payments are final
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+function renderCheckout() {
+  const items = Cart.get();
+  if (items.length === 0) {
+    document.getElementById('cart-empty').style.display = 'block';
+    document.getElementById('cart-content').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('cart-empty').style.display = 'none';
+  document.getElementById('cart-content').style.display = 'block';
+
+  // Show multi-item notice if more than one nominee
+  if (document.getElementById('multi-note')) {
+    document.getElementById('multi-note').style.display = items.length > 1 ? 'block' : 'none';
+  }
+
+  const list = document.getElementById('checkout-items');
+  list.innerHTML = items.map(item => `
+    <div class="checkout-item">
+      <div class="checkout-item-ava">
+        ${item.avatarUrl
+          ? `<img src="${item.avatarUrl}" alt="${item.name}" onerror="this.style.display='none'">`
+          : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--gold);font-size:1.1rem;">${item.name.charAt(0).toUpperCase()}</div>`}
+      </div>
+      <div class="checkout-item-info">
+        <div class="checkout-item-name">${item.name}</div>
+        <div class="checkout-item-cat">${item.category}</div>
+      </div>
+      <div class="checkout-qty-row">
+        <div class="cqb" onclick="Cart.updateQty('${item.contestantId}',-1);renderCheckout()">&#8722;</div>
+        <div class="cqv">${item.quantity}</div>
+        <div class="cqb" onclick="Cart.updateQty('${item.contestantId}',1);renderCheckout()">&#43;</div>
+      </div>
+      <div class="checkout-item-price">&#8358;${(item.quantity * PRICE).toLocaleString()}</div>
+    </div>`).join('');
+
+  document.getElementById('checkout-total').textContent = `\u20A6${Cart.total().toLocaleString()}`;
+
+  const user = Auth.getUser();
+  if (user?.email) document.getElementById('checkout-email').value = user.email;
+}
+
+async function handlePayment() {
+  const items = Cart.get();
+  const email = document.getElementById('checkout-email').value.trim();
+  const btn   = document.getElementById('pay-btn');
+
+  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!email || !emailRe.test(email)) {
+    Toast.error('Required', 'Please enter a valid email address.'); return;
+  }
+  if (items.length === 0) { Toast.error('Empty', 'Your ballot is empty.'); return; }
+
+  // Payments are per-contestant. Process first item; rest stay in cart.
+  const item = items[0];
+  if (items.length > 1) {
+    Toast.info('Note', `Processing votes for ${item.name} first.`);
+  }
+
+  setLoading(btn, true);
+  try {
+    const r = await apiFetch('/voting/initialize', {
+      method: 'POST',
+      body: JSON.stringify({
+        contestantId: item.contestantId,
+        categoryId  : item.categoryId,
+        quantity    : item.quantity,
+        email
+      })
+    });
+    if (r.ok && r.data.authorization_url) {
+      window.location.href = r.data.authorization_url;
+    } else {
+      Toast.error('Payment Error', r.data.message || 'Failed to initialize payment.');
+      setLoading(btn, false, '\uD83D\uDD10 Pay with Paystack');
+    }
+  } catch(err) {
+    Toast.error('Error', 'Network error. Please try again.');
+    setLoading(btn, false, '\uD83D\uDD10 Pay with Paystack');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', renderCheckout);
+</script>
+</body>
+</html>

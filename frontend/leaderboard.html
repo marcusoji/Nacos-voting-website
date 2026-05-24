@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Standings — NACOS Awards 2026</title>
+  <link rel="stylesheet" href="style/main.css">
+</head>
+<body>
+<div class="page-wrap">
+  <div class="container" style="padding-top:3rem;">
+    <h1 class="section-title" style="text-align:center;margin-bottom:.4rem;">Live <span class="accent">Standings</span></h1>
+    <p class="section-sub" style="text-align:center;margin-bottom:3rem;">Real-time vote counts across all categories. Updated instantly.</p>
+
+    <div id="lb-container">
+      <div style="text-align:center;padding:3rem;color:var(--text-muted);">
+        <div class="spinner" style="width:32px;height:32px;margin:0 auto 1rem;border-width:3px;"></div>
+        Loading standings&#8230;
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+// Category icons as inline SVG (no emoji)
+const CAT_ICONS = {
+  'entrepreneur':   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>`,
+  'freshman-male':  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
+  'freshman-female':`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
+  'creator-male':   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`,
+  'creator-female': `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`
+};
+const DEFAULT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="6"/><path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.12"/></svg>`;
+
+// Rank labels — text only, no emoji
+const RANK_LABEL = ['1st', '2nd', '3rd'];
+const RANK_CLASS = ['pos-1', 'pos-2', 'pos-3'];
+const CARD_CLASS = ['rank-1', 'rank-2', 'rank-3'];
+
+function makeInitial(name) {
+  return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-2);font-family:'Playfair Display',serif;font-size:2rem;font-weight:700;color:var(--gold);">${(name||'?').charAt(0).toUpperCase()}</div>`;
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const r = await apiFetch('/voting/leaderboard');
+    const container = document.getElementById('lb-container');
+    if (!r.ok || !r.data.data) throw new Error();
+
+    container.innerHTML = r.data.data.map(block => {
+      const all = [...(block.podium || []), ...(block.rest || [])];
+      const emptyState = `
+        <div class="empty-state" style="padding:2rem;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="6"/><path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.12"/></svg>
+          <p>No nominees yet</p>
+        </div>`;
+
+      return `
+        <div class="podium-section">
+          <div class="podium-header">
+            <div class="podium-icon">${CAT_ICONS[block.category.slug] || DEFAULT_ICON}</div>
+            <span class="podium-title">${block.category.name}</span>
+            <a href="${block.category.slug}.html" class="btn btn-outline btn-sm" style="margin-left:auto;">Vote</a>
+          </div>
+          ${all.length === 0 ? emptyState : (() => {
+            const maxVotes = all[0]?.vote_count || 1;
+            return `<div class="podium-grid">
+              ${all.slice(0, 10).map((con, i) => `
+                <div class="podium-card ${CARD_CLASS[i] || ''}">
+                  <div class="podium-pos ${RANK_CLASS[i] || ''}">${RANK_LABEL[i] || '#' + (i + 1)}</div>
+                  <div class="podium-img-wrap">
+                    ${con.avatar_url
+                      ? `<img class="podium-img" src="${con.avatar_url}" alt="${con.fullname}" onerror="this.outerHTML='${makeInitial(con.fullname).replace(/'/g, "\\'")}'">`
+                      : makeInitial(con.fullname)}
+                  </div>
+                  <div class="podium-body">
+                    <div class="podium-name">${con.fullname}</div>
+                    <div class="podium-votes">${(con.vote_count || 0).toLocaleString()} votes</div>
+                    <div style="height:5px;background:var(--bg-3);border-radius:3px;margin-top:.5rem;overflow:hidden;">
+                      <div style="height:100%;background:var(--gold);border-radius:3px;width:${Math.round((con.vote_count || 0) / maxVotes * 100)}%;transition:width 1s;"></div>
+                    </div>
+                  </div>
+                </div>`).join('')}
+            </div>`;
+          })()}
+        </div>`;
+    }).join('');
+
+  } catch(e) {
+    document.getElementById('lb-container').innerHTML = '<p style="text-align:center;color:var(--crimson)">Failed to load leaderboard. Please refresh.</p>';
+  }
+});
+</script>
+</body>
+</html>

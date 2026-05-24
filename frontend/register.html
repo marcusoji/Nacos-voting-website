@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create Account — NACOS Awards 2026</title>
+  <link rel="stylesheet" href="style/main.css">
+</head>
+<body>
+<div class="page-wrap">
+  <div class="form-page">
+    <div class="form-card form-card-wide">
+      <div class="form-logo-row">
+        <img src="assets/delsu-logo.png" alt="DELSU" onerror="this.style.display='none'">
+        <div class="logo-divider"></div>
+        <img src="assets/nacos-logo.png" alt="NACOS" onerror="this.style.display='none'">
+      </div>
+      <h1 class="form-title">Create Account</h1>
+      <p class="form-subtitle">Register to participate in the DELSU NACOS Awards 2026 voting</p>
+
+      <form onsubmit="handleRegister(event)" autocomplete="on">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Full Name</label>
+            <input type="text" id="r-name" class="form-control" required placeholder="John Doe" autocomplete="name">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Department</label>
+            <input type="text" id="r-dept" class="form-control" placeholder="Computer Science">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email Address</label>
+          <input type="email" id="r-email" class="form-control" required placeholder="johndoe@example.com" autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Matric Number</label>
+          <input type="text" id="r-matric" class="form-control" placeholder="DELSU/2022/10492" autocomplete="username">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" id="r-pass" class="form-control" required placeholder="Min 8 characters" autocomplete="new-password">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Confirm Password</label>
+            <input type="password" id="r-confirm" class="form-control" required placeholder="Repeat password" autocomplete="new-password">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full btn-lg" id="reg-btn" style="margin-top:.5rem;">
+          Create Account
+        </button>
+      </form>
+
+      <div class="form-link-row">
+        Already have an account? <a href="login.html">Sign In</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+async function handleRegister(e) {
+  e.preventDefault();
+  const btn = document.getElementById('reg-btn');
+  const pass = document.getElementById('r-pass').value;
+  const confirm = document.getElementById('r-confirm').value;
+
+  if (pass !== confirm) { Toast.error('Mismatch', 'Passwords do not match.'); return; }
+  if (pass.length < 8)   { Toast.error('Too short', 'Password must be at least 8 characters.'); return; }
+
+  setLoading(btn, true);
+  try {
+    const r = await apiFetch('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        fullname:      document.getElementById('r-name').value.trim(),
+        email:         document.getElementById('r-email').value.trim(),
+        department:    document.getElementById('r-dept').value.trim(),
+        matric_number: document.getElementById('r-matric').value.trim(),
+        password:      pass
+      })
+    });
+    if (r.ok) {
+      Toast.success('Registered!', 'Check your email to verify your account.');
+      setTimeout(() => window.location.href = 'login.html', 2000);
+    } else {
+      Toast.error('Registration Failed', r.data.message || 'Please check your details.');
+    }
+  } catch(err) {
+    Toast.error('Error', 'Network error. Please try again.');
+  } finally {
+    setLoading(btn, false, 'Create Account');
+  }
+}
+</script>
+</body>
+</html>

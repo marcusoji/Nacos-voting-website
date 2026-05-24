@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In — NACOS Awards 2026</title>
+  <link rel="stylesheet" href="style/main.css">
+</head>
+<body>
+<div class="page-wrap">
+  <div class="form-page">
+    <div class="form-card">
+      <div class="form-logo-row">
+        <img src="assets/delsu-logo.png" alt="DELSU" onerror="this.style.display='none'">
+        <div class="logo-divider"></div>
+        <img src="assets/nacos-logo.png" alt="NACOS" onerror="this.style.display='none'">
+      </div>
+      <h1 class="form-title">Welcome Back</h1>
+      <p class="form-subtitle">Sign in to cast your votes for DELSU NACOS Awards 2026</p>
+
+      <div class="tab-switcher">
+        <button class="tab-btn active" id="tab-voter" onclick="setMode('voter')">Voter Login</button>
+        <button class="tab-btn"        id="tab-staff" onclick="setMode('staff')">Staff Login</button>
+      </div>
+
+      <form id="login-form" onsubmit="handleLogin(event)" autocomplete="on">
+        <div class="form-group" id="group-matric">
+          <label class="form-label">Matric Number</label>
+          <input type="text" id="inp-matric" class="form-control" placeholder="DELSU/2022/10492" autocomplete="username">
+        </div>
+        <div class="form-group" id="group-email" style="display:none;">
+          <label class="form-label">Staff Email</label>
+          <input type="email" id="inp-email" class="form-control" placeholder="admin@nacos.com" autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="inp-pass" class="form-control" required placeholder="&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;" autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full btn-lg" id="login-btn">Sign In</button>
+      </form>
+
+      <div class="form-link-row" style="margin-top:.9rem;">
+        <a href="forgot-password.html">Forgot your password?</a>
+      </div>
+      <div class="form-link-row">
+        Don't have an account? <a href="register.html">Register</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+let loginMode = 'voter';
+
+function setMode(mode) {
+  loginMode = mode;
+  document.getElementById('group-matric').style.display = mode === 'voter' ? 'block' : 'none';
+  document.getElementById('group-email').style.display  = mode === 'staff'  ? 'block' : 'none';
+  document.getElementById('tab-voter').classList.toggle('active', mode === 'voter');
+  document.getElementById('tab-staff').classList.toggle('active', mode === 'staff');
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const btn     = document.getElementById('login-btn');
+  const pass    = document.getElementById('inp-pass').value;
+  const payload = { password: pass };
+
+  if (loginMode === 'voter') {
+    payload.matric_number = document.getElementById('inp-matric').value.trim();
+    if (!payload.matric_number) { Toast.error('Required', 'Please enter your matric number.'); return; }
+  } else {
+    payload.email = document.getElementById('inp-email').value.trim();
+    if (!payload.email) { Toast.error('Required', 'Please enter your email address.'); return; }
+  }
+
+  setLoading(btn, true);
+  try {
+    const r = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify(payload) });
+    if (r.ok) {
+      Auth.setUser(r.data.user);
+      if (r.data.access_token) Auth.setToken(r.data.access_token);
+      Toast.success('Welcome back!', r.data.user.fullname);
+      setTimeout(() => {
+        const role = r.data.user?.role;
+        if (role === 'admin')       window.location.href = 'admin-dashboard.html';
+        else if (role === 'moderator') window.location.href = 'moderator-dashboard.html';
+        else window.location.href = 'categories.html';
+      }, 600);
+    } else {
+      Toast.error('Login Failed', r.data.message || 'Invalid credentials.');
+    }
+  } catch(err) {
+    Toast.error('Error', 'Network error. Please try again.');
+  } finally {
+    setLoading(btn, false, 'Sign In');
+  }
+}
+</script>
+</body>
+</html>

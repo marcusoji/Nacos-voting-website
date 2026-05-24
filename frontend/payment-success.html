@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment — NACOS Awards 2026</title>
+  <link rel="stylesheet" href="style/main.css">
+</head>
+<body>
+<div class="page-wrap">
+  <div class="success-page">
+    <div class="success-card" id="success-card">
+      <!-- Icon injected by JS — no emoji -->
+      <div id="success-icon-wrap" class="success-icon wait" style="margin:0 auto 1.25rem;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/>
+        </svg>
+      </div>
+      <h1 class="success-title" id="s-title">Verifying Payment&#8230;</h1>
+      <p class="success-msg" id="s-msg">Please wait while we confirm your transaction with Paystack.</p>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+const ICON_OK  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+const ICON_ERR = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+const ICON_WAIT= `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+
+function setIcon(type) {
+  const el = document.getElementById('success-icon-wrap');
+  el.className = `success-icon ${type}`;
+  el.innerHTML = { ok: ICON_OK, err: ICON_ERR, wait: ICON_WAIT }[type] || ICON_WAIT;
+}
+
+async function verifyPayment() {
+  const params = new URLSearchParams(window.location.search);
+  const ref    = params.get('reference') || params.get('trxref');
+  const card   = document.getElementById('success-card');
+
+  if (!ref) {
+    setIcon('err');
+    document.getElementById('s-title').textContent = 'Invalid Link';
+    document.getElementById('s-msg').textContent   = 'No transaction reference found in the URL.';
+    return;
+  }
+
+  try {
+    const r = await apiFetch(`/voting/verify/${ref}`);
+
+    if (r.ok && r.data.success) {
+      setIcon('ok');
+      document.getElementById('s-title').textContent = 'Votes Recorded!';
+      document.getElementById('s-msg').innerHTML = `
+        Your <strong>${r.data.quantity || ''} vote(s)</strong> have been successfully recorded.
+        Thank you for participating in DELSU NACOS Awards 2026!`;
+      card.insertAdjacentHTML('beforeend', `
+        <div class="success-ref">Reference: ${ref}</div>
+        <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1.25rem;">
+          <a href="leaderboard.html" class="btn btn-primary">View Standings</a>
+          <a href="categories.html"  class="btn btn-outline">Vote Again</a>
+        </div>`);
+      Cart.removeById(r.data.contestantId);
+    } else {
+      setIcon('err');
+      document.getElementById('s-title').textContent = 'Verification Failed';
+      document.getElementById('s-msg').textContent   = r.data.message || 'Payment could not be verified. Contact support.';
+      card.insertAdjacentHTML('beforeend', `
+        <div class="success-ref">Reference: ${ref}</div>
+        <div style="margin-top:1rem;">
+          <a href="categories.html" class="btn btn-outline">Back to Voting</a>
+        </div>`);
+    }
+  } catch(e) {
+    setIcon('err');
+    document.getElementById('s-title').textContent = 'Network Error';
+    document.getElementById('s-msg').textContent   = 'Could not connect. Please refresh or contact support.';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', verifyPayment);
+</script>
+</body>
+</html>
