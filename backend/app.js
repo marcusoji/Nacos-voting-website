@@ -126,6 +126,120 @@ if (require.main === module) {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
     console.log(`[NACOS API] Running on port ${PORT}`);
-    console.log(`[CORS] Allowed origins: ${allowedOrigins.join(', ')}`);
+    console.log(`[CORS] Allowed const express      = require('express');
+const cors         = require('cors');
+const helmet       = require('helmet');
+const cookieParser = require('cookie-parser');
+const morgan       = require('morgan');
+require('dotenv').config();
+
+const { validateEnvironment } = require('./config/envValidator');
+validateEnvironment();
+
+const authRoutes   = require('./routes/authRoutes');
+const votingRoutes = require('./routes/votingRoutes');
+const adminRoutes  = require('./routes/adminRoutes');
+const { globalLimiter } = require('./middleware/rateLimiter');
+
+const app = express();
+
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+// ── Helmet ────────────────────────────────────────────────────
+app.use(helmet({
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc : ["'self'"],
+      scriptSrc  : ["'self'", 'https://js.paystack.co'],
+      styleSrc   : ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc    : ["'self'", 'https://fonts.gstatic.com'],
+      imgSrc     : ["'self'", 'data:', 'https:', 'blob:'],
+      connectSrc : ["'self'", 'https://api.paystack.co', 'https://*.supabase.co'],
+      frameSrc   : ["'self'", 'https://js.paystack.co']
+    }
+  }
+}));
+
+// ── CORS ──────────────────────────────────────────────────────
+// Build allowed list from env — strip trailing slashes so
+// "https://nacossite-decides.vercel.app/" matches the browser
+// origin "https://nacossite-decides.vercel.app" (no slash).
+const corsOptions = {
+  origin(origin, cb) {
+    const allowed = (process.env.FRONTEND_URL || '')
+      .split(',')
+      .map(o => o.trim().replace(/\/$/, ''))
+      .filter(Boolean);
+
+    // Always allow requests with no origin (Paystack webhook, curl, Postman)
+    if (!origin) return cb(null, true);
+
+    // Strip trailing slash from browser-sent origin before comparing
+    const clean = origin.replace(/\/$/, '');
+
+    if (allowed.includes(clean)) return cb(null, true);
+
+    // Allow all origins in non-production so local dev never breaks
+    if (process.env.NODE_ENV !== 'production') return cb(null, true);
+
+    console.warn(`[CORS] Blocked: ${origin}`);
+    cb(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials  : true,
+  methods      : ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  maxAge       : 86400
+};
+
+// Handle preflight OPTIONS for ALL routes BEFORE any other middleware
+app.options('*', cors(corsOptions));
+app.use(cors(corsOptions));
+
+// ── Core middleware ───────────────────────────────────────────
+app.use(globalLimiter);
+app.use(cookieParser(process.env.COOKIE_SECRET));
+
+// Webhook must receive raw body BEFORE the global JSON parser
+app.use('/api/voting/webhook', express.raw({ type: 'application/json' }));
+
+app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+
+// ── Routes ────────────────────────────────────────────────────
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', ts: Date.now() }));
+
+app.use('/api/auth',   authRoutes);
+app.use('/api/voting', votingRoutes);
+app.use('/api/admin',  adminRoutes);
+
+// 404
+app.use((_req, res) => res.status(404).json({ message: 'Route not found.' }));
+
+// Global error handler
+app.use((err, _req, res, _next) => {
+  const status  = err.status || 500;
+  const message = (process.env.NODE_ENV === 'production' && status === 500)
+    ? 'Internal server error.'
+    : (err.message || 'Internal server error.');
+  console.error(`[ERROR ${status}]`, err.message);
+  res.status(status).json({ message });
+});
+
+// Export the app — used by api/index.js (Vercel serverless)
+module.exports = app;
+
+// Start server only when run directly (local dev)
+if (require.main === module) {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`[NACOS API] Running on port ${PORT}`);
+    console.log(`[CORS] FRONTEND_URL = ${process.env.FRONTEND_URL}`);
+  });
+}origins: ${allowedOrigins.join(', ')}`);
   });
 }
