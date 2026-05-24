@@ -10,11 +10,9 @@
 <div class="page-wrap">
   <div class="success-page">
     <div class="success-card" id="success-card">
-      <!-- Icon injected by JS — no emoji -->
       <div id="success-icon-wrap" class="success-icon wait" style="margin:0 auto 1.25rem;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/>
-          <polyline points="12 6 12 12 16 14"/>
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
         </svg>
       </div>
       <h1 class="success-title" id="s-title">Verifying Payment&#8230;</h1>
@@ -25,9 +23,9 @@
 
 <script src="app.js"></script>
 <script>
-const ICON_OK  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-const ICON_ERR = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-const ICON_WAIT= `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+const ICON_OK   = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+const ICON_ERR  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+const ICON_WAIT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
 
 function setIcon(type) {
   const el = document.getElementById('success-icon-wrap');
@@ -35,15 +33,24 @@ function setIcon(type) {
   el.innerHTML = { ok: ICON_OK, err: ICON_ERR, wait: ICON_WAIT }[type] || ICON_WAIT;
 }
 
+let retryCount = 0;
+const MAX_RETRIES = 3;
+
 async function verifyPayment() {
   const params = new URLSearchParams(window.location.search);
-  const ref    = params.get('reference') || params.get('trxref');
-  const card   = document.getElementById('success-card');
+  // Paystack sends both 'reference' and 'trxref' — read either
+  const ref = params.get('reference') || params.get('trxref');
+  const card = document.getElementById('success-card');
 
   if (!ref) {
     setIcon('err');
     document.getElementById('s-title').textContent = 'Invalid Link';
-    document.getElementById('s-msg').textContent   = 'No transaction reference found in the URL.';
+    document.getElementById('s-msg').textContent   = 'No payment reference found. If you just paid, go to your leaderboard to confirm your vote was recorded.';
+    card.insertAdjacentHTML('beforeend', `
+      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1.5rem;">
+        <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
+        <a href="categories.html"  class="btn btn-outline">Back to Voting</a>
+      </div>`);
     return;
   }
 
@@ -53,31 +60,72 @@ async function verifyPayment() {
     if (r.ok && r.data.success) {
       setIcon('ok');
       document.getElementById('s-title').textContent = 'Votes Recorded!';
-      document.getElementById('s-msg').innerHTML = `
-        Your <strong>${r.data.quantity || ''} vote(s)</strong> have been successfully recorded.
-        Thank you for participating in DELSU NACOS Awards 2026!`;
+      document.getElementById('s-msg').innerHTML =
+        `Your <strong>${r.data.quantity || ''} vote(s)</strong> have been successfully recorded. Thank you for participating in DELSU NACOS Awards 2026!`;
       card.insertAdjacentHTML('beforeend', `
-        <div class="success-ref">Reference: ${ref}</div>
+        <div class="success-ref">Ref: ${ref}</div>
         <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1.25rem;">
           <a href="leaderboard.html" class="btn btn-primary">View Standings</a>
           <a href="categories.html"  class="btn btn-outline">Vote Again</a>
         </div>`);
-      Cart.removeById(r.data.contestantId);
+      // Remove only the paid item from the cart
+      if (r.data.contestantId) Cart.removeById(r.data.contestantId);
+      else Cart.clear();
+
+    } else if (r.status === 404 && retryCount < MAX_RETRIES) {
+      // Transaction may still be processing — retry after delay
+      retryCount++;
+      document.getElementById('s-msg').textContent =
+        `Confirming your payment (attempt ${retryCount}/${MAX_RETRIES})&#8230;`;
+      setTimeout(verifyPayment, 3000);
+
     } else {
       setIcon('err');
-      document.getElementById('s-title').textContent = 'Verification Failed';
-      document.getElementById('s-msg').textContent   = r.data.message || 'Payment could not be verified. Contact support.';
+      document.getElementById('s-title').textContent = 'Verification Issue';
+      document.getElementById('s-msg').textContent   =
+        r.data.message || 'Could not verify payment automatically.';
       card.insertAdjacentHTML('beforeend', `
-        <div class="success-ref">Reference: ${ref}</div>
-        <div style="margin-top:1rem;">
-          <a href="categories.html" class="btn btn-outline">Back to Voting</a>
+        <div class="success-ref">Ref: ${ref}</div>
+        <p style="font-size:.8rem;color:var(--text-muted);margin-top:.75rem;">
+          If money was deducted, your votes are likely recorded via our webhook.
+          Check the leaderboard or contact support quoting your reference above.
+        </p>
+        <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+          <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
+          <button onclick="retryVerify('${ref}')" class="btn btn-outline">Retry Verification</button>
         </div>`);
     }
-  } catch(e) {
-    setIcon('err');
-    document.getElementById('s-title').textContent = 'Network Error';
-    document.getElementById('s-msg').textContent   = 'Could not connect. Please refresh or contact support.';
+  } catch (e) {
+    if (retryCount < MAX_RETRIES) {
+      retryCount++;
+      document.getElementById('s-msg').textContent =
+        `Network issue — retrying (${retryCount}/${MAX_RETRIES})&#8230;`;
+      setTimeout(verifyPayment, 4000);
+    } else {
+      setIcon('err');
+      document.getElementById('s-title').textContent = 'Network Error';
+      document.getElementById('s-msg').textContent   =
+        'Could not connect to verify your payment. If money was deducted, your vote is likely recorded. Check the leaderboard.';
+      card.insertAdjacentHTML('beforeend', `
+        <div class="success-ref">Ref: ${ref}</div>
+        <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+          <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
+          <button onclick="retryVerify('${ref}')" class="btn btn-outline">Retry</button>
+        </div>`);
+    }
   }
+}
+
+function retryVerify(ref) {
+  retryCount = 0;
+  // Reset UI
+  setIcon('wait');
+  document.getElementById('s-title').textContent = 'Retrying Verification&#8230;';
+  document.getElementById('s-msg').textContent   = 'Please wait.';
+  // Remove dynamically added elements
+  const card = document.getElementById('success-card');
+  card.querySelectorAll('.success-ref, div[style]').forEach(el => el.remove());
+  verifyPayment();
 }
 
 document.addEventListener('DOMContentLoaded', verifyPayment);
