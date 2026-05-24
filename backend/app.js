@@ -77,7 +77,7 @@ const corsOptions = {
     }
 
     console.warn(`[CORS] Blocked origin: ${origin}`);
-    callback(new Error(`CORS: Origin ${origin} is not permitted.`));
+    return callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -120,7 +120,7 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ message });
 });
 
-module.exports = { app };
+module.exports = app;
 
 if (require.main === module) {
   const PORT = process.env.PORT || 5000;
