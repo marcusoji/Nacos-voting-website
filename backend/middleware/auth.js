@@ -1,52 +1,28 @@
+// middleware/auth.js
+// Uses Bearer token from Authorization header ONLY.
+// No cookies — eliminates all sameSite/cross-origin cookie issues on Vercel.
 const { supabase } = require('../config/db');
 
-// ── Cookie options ─────────────────────────────────────────────
-// FIX: Cross-origin cookies (frontend on one Vercel URL, backend on another)
-// REQUIRE sameSite:'none' + secure:true. Without this, the browser drops the
-// cookie and every authenticated request fails with 401.
-const COOKIE_NAME = 'sb-access-token';
+const extractToken = (req) => {
+  const header = req.headers.authorization || '';
+  if (header.startsWith('Bearer ')) return header.slice(7).trim();
+  return null;
+};
 
-const getCookieOpts = () => ({
-  httpOnly : true,
-  secure   : true,                      // always true — both Vercel URLs are HTTPS
-  signed   : true,
-  sameSite : 'none',                    // required for cross-site cookie sending
-  maxAge   : 24 * 60 * 60 * 1000,      // 24 hours
-  path     : '/'
-});
-
-const clearCookieOpts = () => ({
-  httpOnly : true,
-  secure   : true,
-  sameSite : 'none',
-  path     : '/'
-});
-
-// Export so authController can use them without duplicating
-module.exports.COOKIE_NAME    = COOKIE_NAME;
-module.exports.getCookieOpts  = getCookieOpts;
-module.exports.clearCookieOpts = clearCookieOpts;
-
-// ── verifySession middleware ────────────────────────────────────
-module.exports.verifySession = async (req, res, next) => {
+const verifySession = async (req, res, next) => {
   try {
-    const token = req.signedCookies[COOKIE_NAME];
-
+    const token = extractToken(req);
     if (!token) {
       return res.status(401).json({ message: 'Authentication required. Please log in.' });
     }
 
     const { data: { user }, error } = await supabase.auth.getUser(token);
-
     if (error || !user) {
       return res.status(401).json({ message: 'Session expired. Please log in again.' });
     }
 
     const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single();
+      .from('profiles').select('role').eq('id', user.id).single();
 
     req.user     = user;
     req.userRole = profile?.role || 'user';
@@ -57,26 +33,21 @@ module.exports.verifySession = async (req, res, next) => {
   }
 };
 
-// ── requireRole middleware factory ─────────────────────────────
-module.exports.requireRole = (roles = []) => (req, res, next) => {
+const requireRole = (roles = []) => (req, res, next) => {
   if (!req.userRole || !roles.includes(req.userRole)) {
     return res.status(403).json({ message: 'Access denied. Insufficient permissions.' });
   }
   next();
 };
 
-// ── optionalSession middleware ─────────────────────────────────
-module.exports.optionalSession = async (req, res, next) => {
+const optionalSession = async (req, res, next) => {
   try {
-    const token = req.signedCookies[COOKIE_NAME];
+    const token = extractToken(req);
     if (token) {
       const { data: { user } } = await supabase.auth.getUser(token);
       if (user) {
         const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
+          .from('profiles').select('role').eq('id', user.id).single();
         req.user     = user;
         req.userRole = profile?.role || 'user';
       }
@@ -84,3 +55,5 @@ module.exports.optionalSession = async (req, res, next) => {
   } catch { /* silent */ }
   next();
 };
+
+module.exports = { verifySession, requireRole, optionalSession };
