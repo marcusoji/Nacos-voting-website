@@ -2,7 +2,7 @@
 
 // ── Config ─────────────────────────────────────────────────────
 // FIX: No trailing slash on API URL — causes double-slash on routes
-const _PROD_API = 'https://nacos-voting-api.vercel.app/api'; // your backend Vercel URL
+const _PROD_API = 'https://nacos-voting-website.vercel.app/api'; // your backend Vercel URL
 const _isDev    = ['localhost', '127.0.0.1', ''].includes(location.hostname);
 window.API      = _isDev ? 'http://localhost:5000/api' : _PROD_API;
 window.PRICE    = 100; // NGN 100 per vote
