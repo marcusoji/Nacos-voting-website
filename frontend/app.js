@@ -1,16 +1,14 @@
 // frontend/app.js — shared utilities (non-module, global scope)
+// Loaded as <script src="app.js"> on every page.
 
-// ── Config ─────────────────────────────────────────────────────
-// FIX: No trailing slash on API URL — causes double-slash on routes
-const _PROD_API = 'https://nacos-voting-website.vercel.app/api'; // your backend Vercel URL
+// ── Config ────────────────────────────────────────────────────
+const _PROD_API = 'https://nacos-voting-website.vercel.app//api'; // UPDATE after backend deploy
 const _isDev    = ['localhost', '127.0.0.1', ''].includes(location.hostname);
 window.API      = _isDev ? 'http://localhost:5000/api' : _PROD_API;
 window.PRICE    = 100; // NGN 100 per vote
 
-window.SUPABASE_URL      = 'https://jgmrfragfzfiyqxsoyvh.supabase.co';
-window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpnbXJmcmFnZnpmaXlxeHNveXZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NjcxODksImV4cCI6MjA5NTE0MzE4OX0.JWC2Vi-aP2NlfDjcByuiMgBF_-eqAOyqKaSN7to6RM8';
 
-// ── SVG icons ──────────────────────────────────────────────────
+// ── SVG icons ─────────────────────────────────────────────────
 const SVG = {
   ballot: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`,
   trash : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>`,
@@ -20,61 +18,82 @@ const SVG = {
   warn  : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
 };
 
-// ── Route Guard ────────────────────────────────────────────────
+// ── Route Guard ───────────────────────────────────────────────
+// Pages that do NOT require login
 const PUBLIC_PAGES = new Set([
   '', 'index.html', 'login.html', 'register.html',
   'forgot-password.html', 'reset-password.html',
-  'leaderboard.html', 'categories.html', 'payment-success.html',
-  'entrepreneur.html', 'freshman-male.html', 'freshman-female.html',
-  'creator-male.html', 'creator-female.html'
 ]);
 
+// Pages that require admin role
 const ADMIN_PAGES = new Set(['admin-dashboard.html']);
+
+// Pages that require admin or moderator role
 const STAFF_PAGES = new Set(['moderator-dashboard.html']);
 
 (function routeGuard() {
   const page = location.pathname.split('/').pop() || 'index.html';
-  let user = null;
-  try { user = JSON.parse(localStorage.getItem('nacos_user')); } catch {}
+  const user = (function() {
+    try { return JSON.parse(localStorage.getItem('nacos_user')); } catch { return null; }
+  })();
 
-  if (!PUBLIC_PAGES.has(page) && !user) { location.replace('login.html'); return; }
-  if (ADMIN_PAGES.has(page) && user?.role !== 'admin') { location.replace('login.html'); return; }
-  if (STAFF_PAGES.has(page) && !['admin','moderator'].includes(user?.role)) { location.replace('login.html'); return; }
-  if (page === 'checkout.html' && !user) { location.replace('login.html'); return; }
+  // Not logged in and page requires auth → redirect to login
+  if (!PUBLIC_PAGES.has(page) && !user) {
+    location.replace('login.html');
+    return;
+  }
+
+  // Admin page but not admin
+  if (ADMIN_PAGES.has(page) && user?.role !== 'admin') {
+    location.replace('login.html');
+    return;
+  }
+
+  // Staff page but not staff
+  if (STAFF_PAGES.has(page) && user?.role !== 'admin' && user?.role !== 'moderator') {
+    location.replace('login.html');
+    return;
+  }
+
+  // checkout requires login
+  if (page === 'checkout.html' && !user) {
+    location.replace('login.html');
+    return;
+  }
 })();
 
-// ── Fetch helper ───────────────────────────────────────────────
-// FIX: credentials:'include' is essential for cross-origin cookies.
-// Without it the browser won't send or receive the auth cookie.
+// ── Fetch helper ──────────────────────────────────────────────
 window.apiFetch = async (path, opts = {}) => {
   try {
+    const token = window.Auth?.getToken?.();
+    const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
     const res  = await fetch(`${window.API}${path}`, {
-      credentials : 'include',          // REQUIRED for cross-origin cookies
-      headers     : { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...authHeader, ...(opts.headers || {}) },
       ...opts
     });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, data };
   } catch (err) {
-    console.error('[apiFetch]', path, err.message);
-    return { ok: false, status: 0, data: { message: 'Network error. Please check your connection.' } };
+    console.error('[apiFetch]', err);
+    return { ok: false, status: 0, data: { message: 'Network error. Check your connection.' } };
   }
 };
 
-// ── Loading helper ─────────────────────────────────────────────
+// ── Loading helper ────────────────────────────────────────────
 window.setLoading = (btn, loading, original = 'Submit') => {
   if (!btn) return;
   if (loading) {
-    btn.disabled     = true;
+    btn.disabled    = true;
     btn.dataset.orig = btn.innerHTML;
-    btn.innerHTML    = `<span class="spinner"></span> Processing…`;
+    btn.innerHTML   = `<span class="spinner"></span> Processing…`;
   } else {
     btn.disabled  = false;
     btn.innerHTML = btn.dataset.orig || original;
   }
 };
 
-// ── Toast ──────────────────────────────────────────────────────
+// ── Toast ─────────────────────────────────────────────────────
 window.Toast = {
   show(title, msg = '', type = 'info') {
     let c = document.getElementById('toasts');
@@ -98,42 +117,45 @@ window.Toast = {
   warning(t, m) { this.show(t, m, 'warning');  }
 };
 
-// ── Auth ───────────────────────────────────────────────────────
+// ── Auth ──────────────────────────────────────────────────────
 window.Auth = {
-  _key: 'nacos_user',
-  getUser()    { try { return JSON.parse(localStorage.getItem(this._key)); } catch { return null; } },
-  setUser(u)   { localStorage.setItem(this._key, JSON.stringify(u)); },
-  clear()      { localStorage.removeItem(this._key); },
-  isLoggedIn() { return !!this.getUser(); },
-  role()       { return this.getUser()?.role || 'user'; },
+  _key:      'nacos_user',
+  _tokenKey: 'nacos_token',
+  getUser()     { try { return JSON.parse(localStorage.getItem(this._key)); } catch { return null; } },
+  setUser(u)    { localStorage.setItem(this._key, JSON.stringify(u)); },
+  getToken()    { return localStorage.getItem(this._tokenKey) || null; },
+  setToken(t)   { if (t) localStorage.setItem(this._tokenKey, t); },
+  clear()       { localStorage.removeItem(this._key); localStorage.removeItem(this._tokenKey); },
+  isLoggedIn()  { return !!this.getUser(); },
+  role()        { return this.getUser()?.role || 'user'; },
 
+  // Silently refresh session — if expired, clears local state & reloads once
   async checkSession() {
     try {
-      const r = await fetch(`${window.API}/auth/me`, {
-        credentials : 'include'         // REQUIRED — must match the fetch helper
-      });
+      const token = this.getToken();
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+      const r = await fetch(`${window.API}/auth/me`, { credentials: 'include', headers });
       if (r.ok) {
         const d = await r.json();
         this.setUser(d.user);
         return d.user;
       }
+      // Session invalid — clear and redirect only if on a protected page
       const page = location.pathname.split('/').pop() || 'index.html';
       if (!PUBLIC_PAGES.has(page)) {
         this.clear();
         location.replace('login.html');
-      } else {
-        this.clear();
       }
+      // Do NOT clear on public pages (e.g. login.html) — user may have just logged in
       return null;
     } catch { return null; }
   },
 
   async logout() {
     try {
-      await fetch(`${window.API}/auth/logout`, {
-        method      : 'POST',
-        credentials : 'include'
-      });
+      const token = this.getToken();
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+      await fetch(`${window.API}/auth/logout`, { method: 'POST', credentials: 'include', headers });
     } catch {}
     this.clear();
     Cart.clear();
@@ -141,11 +163,15 @@ window.Auth = {
   }
 };
 
-// ── Cart ───────────────────────────────────────────────────────
+// ── Cart ──────────────────────────────────────────────────────
 window.Cart = {
   _key: 'nacos_cart',
   get()       { try { return JSON.parse(localStorage.getItem(this._key)) || []; } catch { return []; } },
-  save(items) { localStorage.setItem(this._key, JSON.stringify(items)); this.updateBadge(); if (window._cartSidebar) window._cartSidebar.render(); },
+  save(items) {
+    localStorage.setItem(this._key, JSON.stringify(items));
+    this.updateBadge();
+    if (window._cartSidebar) window._cartSidebar.render();
+  },
   clear()     { localStorage.removeItem(this._key); this.updateBadge(); if (window._cartSidebar) window._cartSidebar.render(); },
   count()     { return this.get().reduce((s, i) => s + i.quantity, 0); },
   total()     { return this.get().reduce((s, i) => s + i.quantity * PRICE, 0); },
@@ -177,21 +203,26 @@ window.Cart = {
   }
 };
 
-// ── Navbar ─────────────────────────────────────────────────────
+// ── Navbar ────────────────────────────────────────────────────
 function buildNavbar() {
   const user = Auth.getUser();
   const page = location.pathname.split('/').pop() || 'index.html';
 
+  // Nav links — only show Dashboard link for staff
   const links = [
     { href: 'index.html',       label: 'Home' },
     { href: 'categories.html',  label: 'Vote' },
-    { href: 'leaderboard.html', label: 'Leaderboard' }
+    { href: 'leaderboard.html', label: 'Leaderboard' },
   ];
-  if (user?.role === 'admin')     links.push({ href: 'admin-dashboard.html',     label: 'Dashboard' });
-  if (user?.role === 'moderator') links.push({ href: 'moderator-dashboard.html', label: 'Dashboard' });
+  if (user?.role === 'admin') {
+    links.push({ href: 'admin-dashboard.html', label: 'Dashboard' });
+  } else if (user?.role === 'moderator') {
+    links.push({ href: 'moderator-dashboard.html', label: 'Dashboard' });
+  }
 
   const nav = document.createElement('nav');
-  nav.className = 'navbar'; nav.id = 'main-navbar';
+  nav.className = 'navbar';
+  nav.id        = 'main-navbar';
   nav.innerHTML = `
     <a href="index.html" class="nav-brand">
       <div class="logo-cluster">
@@ -219,7 +250,8 @@ function buildNavbar() {
     </div>`;
 
   const mob = document.createElement('div');
-  mob.className = 'mobile-nav'; mob.id = 'mobile-nav';
+  mob.className = 'mobile-nav';
+  mob.id        = 'mobile-nav';
   mob.innerHTML = links.map(l => `<a href="${l.href}">${l.label}</a>`).join('') +
     (user
       ? `<button class="btn btn-ghost btn-sm" style="margin-top:8px;width:100%;" onclick="Auth.logout()">Logout</button>`
@@ -227,6 +259,7 @@ function buildNavbar() {
 
   document.body.prepend(mob);
   document.body.prepend(nav);
+
   window.addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 20));
   Cart.updateBadge();
 }
@@ -236,9 +269,10 @@ function toggleMobileNav() {
   document.getElementById('hamburger')?.classList.toggle('open');
 }
 
-// ── Cart Sidebar ───────────────────────────────────────────────
+// ── Cart Sidebar ──────────────────────────────────────────────
 window.CartSidebar = {
   el: null, overlay: null,
+
   init() {
     const s = document.createElement('div');
     s.className = 'cart-sidebar'; s.id = 'cart-sidebar';
@@ -256,33 +290,53 @@ window.CartSidebar = {
         <a href="checkout.html" class="btn btn-gold btn-full">Proceed to Checkout</a>
         <button class="btn btn-ghost btn-full mt-8" onclick="CartSidebar.close()">Continue Voting</button>
       </div>`;
-    document.body.appendChild(s); this.el = s;
+    document.body.appendChild(s);
+    this.el = s;
+
     const o = document.createElement('div');
-    o.className = 'cart-overlay'; o.onclick = () => this.close();
-    document.body.appendChild(o); this.overlay = o;
-    window._cartSidebar = this; this.render();
+    o.className = 'cart-overlay';
+    o.onclick   = () => this.close();
+    document.body.appendChild(o);
+    this.overlay = o;
+
+    window._cartSidebar = this;
+    this.render();
   },
+
   toggle() { this.el?.classList.contains('open') ? this.close() : this.open(); },
   open()   { this.render(); this.el?.classList.add('open'); this.overlay?.classList.add('open'); document.body.style.overflow = 'hidden'; },
   close()  { this.el?.classList.remove('open'); this.overlay?.classList.remove('open'); document.body.style.overflow = ''; },
+
   render() {
     const items = Cart.get();
     const list  = document.getElementById('cart-items-list');
     const foot  = document.getElementById('cart-foot');
     const tot   = document.getElementById('cart-total-amt');
     if (!list) return;
+
     if (!items.length) {
-      list.innerHTML = `<div class="cart-empty"><div class="cart-empty-icon">${SVG.ballot}</div><p>Your ballot is empty</p><p class="text-muted" style="font-size:.8rem;margin-top:.25rem;">Browse categories to add votes</p></div>`;
-      if (foot) foot.style.display = 'none'; return;
+      list.innerHTML = `
+        <div class="cart-empty">
+          <div class="cart-empty-icon">${SVG.ballot}</div>
+          <p>Your ballot is empty</p>
+          <p class="text-muted" style="font-size:.8rem;margin-top:.25rem;">Browse categories to add votes</p>
+        </div>`;
+      if (foot) foot.style.display = 'none';
+      return;
     }
+
     if (foot) foot.style.display = 'block';
     if (tot)  tot.textContent = `\u20A6${Cart.total().toLocaleString()}`;
+
     list.innerHTML = items.map(item => `
       <div class="cart-item" data-id="${item.contestantId}">
         <div class="cart-item-top">
           <div class="cart-item-ava">
-            ${item.avatarUrl ? `<img src="${item.avatarUrl}" alt="" onerror="this.style.display='none'">` : ''}
-            <span class="avatar-initial">${item.name.charAt(0).toUpperCase()}</span>
+            ${item.avatarUrl
+              ? `<img src="${item.avatarUrl}" alt="" onerror="this.style.display='none'">`
+              : ''
+            }
+            <span class="avatar-initial" style="${item.avatarUrl ? 'display:none' : ''}">${item.name.charAt(0).toUpperCase()}</span>
           </div>
           <div style="flex:1;min-width:0;">
             <div class="cart-item-name">${item.name}</div>
@@ -302,9 +356,10 @@ window.CartSidebar = {
   }
 };
 
-// ── Vote Modal ─────────────────────────────────────────────────
+// ── Vote Modal ────────────────────────────────────────────────
 window.VoteModal = {
   el: null, current: null, qty: 1,
+
   init() {
     const m = document.createElement('div');
     m.className = 'modal-overlay'; m.id = 'vote-modal';
@@ -330,42 +385,56 @@ window.VoteModal = {
         <button class="btn btn-ghost btn-full mt-8" onclick="VoteModal.close()">Cancel</button>
       </div>`;
     m.addEventListener('click', e => { if (e.target === m) this.close(); });
-    document.body.appendChild(m); this.el = m;
+    document.body.appendChild(m);
+    this.el = m;
   },
+
   open(contestant) {
     this.current = contestant; this.qty = 1;
     document.getElementById('vm-name').textContent = contestant.name;
     document.getElementById('vm-cat').textContent  = contestant.category || '';
-    const ava  = document.getElementById('vm-avatar');
-    const init = contestant.name.charAt(0).toUpperCase();
+
+    const ava   = document.getElementById('vm-avatar');
+    const init  = contestant.name.charAt(0).toUpperCase();
+    // Use data-initial to avoid apostrophe injection in onerror attributes
     ava.innerHTML = contestant.avatarUrl
-      ? `<img src="${contestant.avatarUrl}" alt="${contestant.name}" data-initial="${init}"
-             style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:2px solid var(--border-gold);"
-             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+      ? `<img
+           src="${contestant.avatarUrl}"
+           alt="${contestant.name}"
+           data-initial="${init}"
+           style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:2px solid var(--border-gold);"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
          <div class="avatar-initial-lg" style="display:none">${init}</div>`
       : `<div class="avatar-initial-lg">${init}</div>`;
+
     this._update();
-    this.el.classList.add('open'); document.body.style.overflow = 'hidden';
+    this.el.classList.add('open');
+    document.body.style.overflow = 'hidden';
   },
+
   close()      { this.el?.classList.remove('open'); document.body.style.overflow = ''; },
   adjustQty(d) { this.qty = Math.max(1, Math.min(1000, this.qty + d)); this._update(); },
+
   _update() {
     document.getElementById('vm-qty').textContent   = this.qty;
     document.getElementById('vm-price').textContent = `\u20A6${(this.qty * PRICE).toLocaleString()}`;
   },
+
   addToCart() {
     if (!this.current) return;
     Cart.add({ ...this.current, contestantId: this.current.id, quantity: this.qty });
-    this.close(); setTimeout(() => CartSidebar.open(), 300);
+    this.close();
+    setTimeout(() => CartSidebar.open(), 300);
   }
 };
 
-// ── Counters ───────────────────────────────────────────────────
+// ── Animated counters ─────────────────────────────────────────
 function initCounters() {
   document.querySelectorAll('[data-count]').forEach(el => {
     const target = parseInt(el.dataset.count, 10);
     const obs = new IntersectionObserver(([entry]) => {
-      if (!entry.isIntersecting) return; obs.disconnect();
+      if (!entry.isIntersecting) return;
+      obs.disconnect();
       let v = 0; const step = target / (1500 / 16);
       const id = setInterval(() => {
         v += step;
@@ -377,11 +446,12 @@ function initCounters() {
   });
 }
 
-// ── Init ───────────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   buildNavbar();
   CartSidebar.init();
   VoteModal.init();
   initCounters();
+  // Silently verify session — fixes stale role in localStorage
   Auth.checkSession();
 });
