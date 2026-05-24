@@ -1,27 +1,43 @@
-const { supabase, supabaseAuth } = require('../config/db');
+const { supabase } = require('../config/db');
 
-/**
- * verifySession
- * Reads from BOTH standard Authorization Headers (Bearer) and signed cookies.
- */
-const verifySession = async (req, res, next) => {
+// ── Cookie options ─────────────────────────────────────────────
+// FIX: Cross-origin cookies (frontend on one Vercel URL, backend on another)
+// REQUIRE sameSite:'none' + secure:true. Without this, the browser drops the
+// cookie and every authenticated request fails with 401.
+const COOKIE_NAME = 'sb-access-token';
+
+const getCookieOpts = () => ({
+  httpOnly : true,
+  secure   : true,                      // always true — both Vercel URLs are HTTPS
+  signed   : true,
+  sameSite : 'none',                    // required for cross-site cookie sending
+  maxAge   : 24 * 60 * 60 * 1000,      // 24 hours
+  path     : '/'
+});
+
+const clearCookieOpts = () => ({
+  httpOnly : true,
+  secure   : true,
+  sameSite : 'none',
+  path     : '/'
+});
+
+// Export so authController can use them without duplicating
+module.exports.COOKIE_NAME    = COOKIE_NAME;
+module.exports.getCookieOpts  = getCookieOpts;
+module.exports.clearCookieOpts = clearCookieOpts;
+
+// ── verifySession middleware ────────────────────────────────────
+module.exports.verifySession = async (req, res, next) => {
   try {
-    let token = null;
-
-    // 1. Check for Authorization: Bearer <token> header (Used by frontend apiFetch)
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
-      token = req.headers.authorization.split(' ')[1];
-    } 
-    // 2. Fallback to reading the signed cookie if headers are absent
-    else if (req.signedCookies && req.signedCookies['sb-access-token']) {
-      token = req.signedCookies['sb-access-token'];
-    }
+    const token = req.signedCookies[COOKIE_NAME];
 
     if (!token) {
       return res.status(401).json({ message: 'Authentication required. Please log in.' });
     }
 
-    const { data: { user }, error } = await supabaseAuth.auth.getUser(token);
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+
     if (error || !user) {
       return res.status(401).json({ message: 'Session expired. Please log in again.' });
     }
@@ -36,36 +52,25 @@ const verifySession = async (req, res, next) => {
     req.userRole = profile?.role || 'user';
     next();
   } catch (err) {
+    console.error('[verifySession]', err.message);
     return res.status(401).json({ message: 'Unauthorized.' });
   }
 };
 
-/**
- * requireRole(['admin']) or requireRole(['admin','moderator'])
- * Must be placed AFTER verifySession in the middleware chain.
- */
-const requireRole = (roles = []) => (req, res, next) => {
+// ── requireRole middleware factory ─────────────────────────────
+module.exports.requireRole = (roles = []) => (req, res, next) => {
   if (!req.userRole || !roles.includes(req.userRole)) {
     return res.status(403).json({ message: 'Access denied. Insufficient permissions.' });
   }
   next();
 };
 
-/**
- * optionalSession
- * Populates req.user if an authentication vector is passed, but does not block if absent.
- */
-const optionalSession = async (req, res, next) => {
+// ── optionalSession middleware ─────────────────────────────────
+module.exports.optionalSession = async (req, res, next) => {
   try {
-    let token = null;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
-      token = req.headers.authorization.split(' ')[1];
-    } else if (req.signedCookies && req.signedCookies['sb-access-token']) {
-      token = req.signedCookies['sb-access-token'];
-    }
-
+    const token = req.signedCookies[COOKIE_NAME];
     if (token) {
-      const { data: { user } } = await supabaseAuth.auth.getUser(token);
+      const { data: { user } } = await supabase.auth.getUser(token);
       if (user) {
         const { data: profile } = await supabase
           .from('profiles')
@@ -76,10 +81,6 @@ const optionalSession = async (req, res, next) => {
         req.userRole = profile?.role || 'user';
       }
     }
-    next();
-  } catch (err) {
-    next(); 
-  }
+  } catch { /* silent */ }
+  next();
 };
-
-module.exports = { verifySession, requireRole, optionalSession };
