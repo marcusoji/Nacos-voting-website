@@ -20,9 +20,7 @@ const SVG = {
 const PUBLIC_PAGES = new Set([
   '', 'index.html', 'login.html', 'register.html',
   'forgot-password.html', 'reset-password.html',
-  'leaderboard.html', 'categories.html', 'payment-success.html',
-  'entrepreneur.html', 'freshman-male.html', 'freshman-female.html',
-  'creator-male.html', 'creator-female.html'
+  
 ]);
 const ADMIN_PAGES = new Set(['admin-dashboard.html']);
 const STAFF_PAGES = new Set(['moderator-dashboard.html']);
