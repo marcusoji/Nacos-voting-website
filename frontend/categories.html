@@ -5,51 +5,140 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vote — NACOS Awards 2026</title>
   <link rel="stylesheet" href="style/main.css">
+  <link rel="stylesheet" href="style/index.css">
 </head>
 <body>
-<div class="page-wrap">
-  <div class="container" style="padding-top:3rem;">
-    <h1 class="section-title" style="margin-bottom:.4rem;">Award <span class="accent">Categories</span></h1>
-    <p class="section-sub" style="margin-bottom:2.5rem;">Select a category to view nominees and cast your votes. &#8358;50 per vote.</p>
 
-    <div class="cat-grid" id="cat-grid">
-      <div style="grid-column:1/-1;text-align:center;padding:3rem;color:var(--text-muted);">
-        <div class="spinner" style="width:28px;height:28px;margin:0 auto 1rem;border-width:3px;"></div>
-        Loading categories&#8230;
-      </div>
+<!-- ── SPLASH SCREEN ─────────────────────────────── -->
+<div id="splash-screen">
+  <div class="splash-orb">
+    <div class="splash-orb-inner">NACOS<br>2026</div>
+  </div>
+  <div class="splash-text">
+    <div class="splash-title">DELSU NACOS Awards</div>
+    <div class="splash-sub">Celebrating Excellence</div>
+  </div>
+  <div class="splash-bar"><div class="splash-bar-fill"></div></div>
+</div>
+
+<!-- ── GENDER PICKER SHEET ───────────────────────── -->
+<div id="gender-picker">
+  <div class="gender-sheet">
+    <div class="gender-orb"></div>
+    <div class="gender-title" id="gp-title">Choose Category</div>
+    <div class="gender-sub" id="gp-sub">Select your preferred category</div>
+    <div class="gender-btns">
+      <button class="gender-btn" id="gp-male" onclick="genderGo('male')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="8" r="5"/><path d="M3 21v-2a7 7 0 0 1 14 0v2"/>
+        </svg>
+        Male
+      </button>
+      <button class="gender-btn" id="gp-female" onclick="genderGo('female')">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+          <circle cx="12" cy="8" r="5"/><path d="M3 21v-2a7 7 0 0 1 14 0v2"/>
+          <path d="M12 13v8M9 18h6" stroke-linecap="round"/>
+        </svg>
+        Female
+      </button>
     </div>
+    <button class="gender-close" onclick="closeGender()">Cancel</button>
   </div>
 </div>
 
+<!-- ── MAIN PAGE ─────────────────────────────────── -->
+<div class="cats-page">
+
+  <div class="cats-header">
+    <div class="cats-logo-orb">
+      <div class="cats-logo-orb-text">NACOS<br>2026</div>
+    </div>
+    <h1 class="cats-heading">Award <em>Categories</em></h1>
+    <p class="cats-subhead">Cast your vote &mdash; &#8358;50 per vote</p>
+  </div>
+
+  <div class="cats-divider"><div class="cats-divider-diamond"></div></div>
+
+  <div class="cats-grid" id="cats-grid">
+    <!-- Cards injected by JS -->
+    <div style="grid-column:1/-1;text-align:center;padding:2rem;color:var(--iv-muted);">
+      <div style="width:28px;height:28px;border:2px solid var(--iv-gold);border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 1rem;"></div>
+      Loading&#8230;
+    </div>
+  </div>
+
+</div>
+
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 <script src="app.js"></script>
 <script>
-const CAT_ICONS = {
-  'entrepreneur':   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`,
-  'freshman-male':  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
-  'freshman-female':`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
-  'creator-male':   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`,
-  'creator-female': `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`
-};
-const DEFAULT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="6"/><path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.12"/></svg>`;
+/* ---------- Category config ---------- */
+const CATS = [
+  { slug:'entrepreneur',   name:'Entrepreneur\nof the Year',   gender:false,  page:'entrepreneur.html' },
+  { slug:'freshman',       name:'Freshman\nof the Year',       gender:true,   male:'freshman-male.html',   female:'freshman-female.html' },
+  { slug:'creator',        name:'Content Creator\nof the Year',gender:true,   male:'creator-male.html',   female:'creator-female.html' }
+];
 
-document.addEventListener('DOMContentLoaded', async () => {
-  try {
-    const r = await apiFetch('/voting/categories');
-    const grid = document.getElementById('cat-grid');
-    if (r.ok && r.data.data && r.data.data.length) {
-      grid.innerHTML = r.data.data.map(cat => `
-        <a href="${cat.slug}.html" class="cat-card">
-          <div class="cat-card-icon">${CAT_ICONS[cat.slug] || DEFAULT_ICON}</div>
-          <div class="cat-name">${cat.name}</div>
-          <div class="cat-desc">${cat.description || ''}</div>
-          <div class="cat-arrow">View nominees &rarr;</div>
-        </a>`).join('');
-    } else {
-      grid.innerHTML = '<p style="grid-column:1/-1;text-align:center;color:var(--text-muted);">No categories available yet.</p>';
-    }
-  } catch(e) {
-    document.getElementById('cat-grid').innerHTML = '<p style="grid-column:1/-1;text-align:center;color:var(--crimson);">Failed to load. Please refresh.</p>';
-  }
+const CAT_ICONS = {
+  entrepreneur: `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>`,
+  freshman    : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
+  creator     : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`
+};
+
+let _pendingSlug = null;
+
+/* ---------- Render category cards ---------- */
+function renderCats() {
+  const grid = document.getElementById('cats-grid');
+  grid.innerHTML = CATS.map(cat => `
+    <div class="cat-env-card" onclick="handleCatClick('${cat.slug}')">
+      <div class="cat-env-flap">
+        <div class="cat-env-icon">${CAT_ICONS[cat.slug] || ''}</div>
+      </div>
+      <div class="cat-env-body">
+        <div class="cat-env-name">${cat.name.replace('\n','<br>')}</div>
+        <div class="cat-env-cta">${cat.gender ? 'Choose' : 'Vote now'}</div>
+      </div>
+    </div>`).join('');
+}
+
+/* ---------- Handle click ---------- */
+function handleCatClick(slug) {
+  const cat = CATS.find(c => c.slug === slug);
+  if (!cat) return;
+  if (!cat.gender) { location.href = cat.page; return; }
+  /* Open gender picker */
+  _pendingSlug = slug;
+  document.getElementById('gp-title').textContent = cat.name.replace('\n',' ');
+  document.getElementById('gp-sub').textContent   = 'Select male or female category';
+  document.getElementById('gender-picker').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function genderGo(gender) {
+  const cat = CATS.find(c => c.slug === _pendingSlug);
+  if (!cat) return;
+  closeGender();
+  location.href = gender === 'male' ? cat.male : cat.female;
+}
+
+function closeGender() {
+  document.getElementById('gender-picker').classList.remove('open');
+  document.body.style.overflow = '';
+  _pendingSlug = null;
+}
+document.getElementById('gender-picker').addEventListener('click', function(e) {
+  if (e.target === this) closeGender();
+});
+
+/* ---------- Splash screen ---------- */
+document.addEventListener('DOMContentLoaded', () => {
+  renderCats(); /* render immediately — no API needed for category list */
+  setTimeout(() => {
+    const splash = document.getElementById('splash-screen');
+    splash.classList.add('hiding');
+    setTimeout(() => { splash.style.display = 'none'; }, 800);
+  }, 6000);
 });
 </script>
 </body>

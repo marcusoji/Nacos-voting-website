@@ -5,90 +5,136 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Live Standings — NACOS Awards 2026</title>
   <link rel="stylesheet" href="style/main.css">
+  <link rel="stylesheet" href="style/index.css">
 </head>
 <body>
-<div class="page-wrap">
-  <div class="container" style="padding-top:3rem;">
-    <h1 class="section-title" style="text-align:center;margin-bottom:.4rem;">Live <span class="accent">Standings</span></h1>
-    <p class="section-sub" style="text-align:center;margin-bottom:3rem;">Real-time vote counts across all categories. Updated instantly.</p>
+<div class="lb-page page-wrap">
 
-    <div id="lb-container">
-      <div style="text-align:center;padding:3rem;color:var(--text-muted);">
-        <div class="spinner" style="width:32px;height:32px;margin:0 auto 1rem;border-width:3px;"></div>
-        Loading standings&#8230;
-      </div>
+  <div style="max-width:700px;margin:0 auto;padding:2.5rem 1.5rem 1.5rem;">
+    <div style="text-align:center;margin-bottom:2rem;">
+      <div style="width:52px;height:52px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#E8C472,#C9A14A 45%,#8B6914);box-shadow:0 4px 20px rgba(201,161,74,.4);margin:0 auto 1rem;"></div>
+      <h1 style="font-family:'Playfair Display',serif;font-size:clamp(1.5rem,4vw,2.2rem);font-weight:700;color:var(--text,#f0f4f1);margin-bottom:.3rem;">
+        Live <span style="color:#C9A14A;">Standings</span>
+      </h1>
+      <p style="color:var(--text-muted,#5e7060);font-size:.85rem;">Real-time rankings &mdash; updated after every payment</p>
     </div>
   </div>
+
+  <div id="lb-container">
+    <div style="text-align:center;padding:3rem;color:var(--text-muted,#5e7060);">
+      <div style="width:32px;height:32px;border:2px solid #C9A14A;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 1rem;"></div>
+      Loading standings&#8230;
+    </div>
+  </div>
+
 </div>
 
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 <script src="app.js"></script>
 <script>
-// Category icons as inline SVG (no emoji)
 const CAT_ICONS = {
-  'entrepreneur':   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>`,
-  'freshman-male':  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
-  'freshman-female':`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
-  'creator-male':   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`,
-  'creator-female': `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`
+  'entrepreneur'  : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>`,
+  'freshman-male' : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
+  'freshman-female': `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
+  'creator-male'  : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`,
+  'creator-female': `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`
 };
-const DEFAULT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="6"/><path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.12"/></svg>`;
 
-// Rank labels — text only, no emoji
-const RANK_LABEL = ['1st', '2nd', '3rd'];
-const RANK_CLASS = ['pos-1', 'pos-2', 'pos-3'];
-const CARD_CLASS = ['rank-1', 'rank-2', 'rank-3'];
+function initial(name) {
+  return `<div class="lb-podium-initial">${(name||'?').charAt(0).toUpperCase()}</div>`;
+}
 
-function makeInitial(name) {
-  return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-2);font-family:'Playfair Display',serif;font-size:2rem;font-weight:700;color:var(--gold);">${(name||'?').charAt(0).toUpperCase()}</div>`;
+function imgOrInitial(con, cls='') {
+  if (con.avatar_url) {
+    return `<img class="${cls}" src="${con.avatar_url}" alt="${con.fullname}"
+              onerror="this.outerHTML='${initial(con.fullname).replace(/'/g,"\\'")}'" >`;
+  }
+  return initial(con.fullname);
+}
+
+function podiumCard(con, rank) {
+  const cls = ['p1','p2','p3'][rank] || '';
+  const lbl = ['1st — Gold','2nd — Silver','3rd — Bronze'][rank] || `#${rank+1}`;
+  return `
+    <div class="lb-podium-card ${cls}">
+      <div class="lb-podium-rank">${lbl}</div>
+      <div class="lb-podium-img">${imgOrInitial(con,'')}</div>
+      <div class="lb-podium-name">${con.fullname}</div>
+      <div class="lb-podium-votes">${(con.vote_count||0).toLocaleString()}</div>
+    </div>`;
+}
+
+function listRow(con, rank, maxVotes) {
+  const pct = maxVotes ? Math.round((con.vote_count||0)/maxVotes*100) : 0;
+  const ava = con.avatar_url
+    ? `<img src="${con.avatar_url}" alt="" style="width:100%;height:100%;object-fit:cover;"
+           onerror="this.outerHTML='<span style=\'font-family:Playfair Display,serif;font-size:.9rem;color:#C9A14A;font-weight:700;\'>${con.fullname.charAt(0)}</span>'">`
+    : `<span style="font-family:'Playfair Display',serif;font-size:.9rem;color:#C9A14A;font-weight:700;">${con.fullname.charAt(0)}</span>`;
+  return `
+    <div class="lb-list-row">
+      <div class="lb-list-pos">#${rank+1}</div>
+      <div class="lb-list-ava">${ava}</div>
+      <div class="lb-list-name">${con.fullname}</div>
+      <div class="lb-list-votes">${(con.vote_count||0).toLocaleString()}</div>
+      <div class="lb-list-bar">
+        <div class="lb-list-bar-fill" style="width:${pct}%"></div>
+      </div>
+    </div>`;
+}
+
+function renderBlock(block) {
+  const all      = [...(block.podium||[]), ...(block.rest||[])];
+  const maxVotes = all[0]?.vote_count || 1;
+  const top3     = all.slice(0, 3);
+  const next5    = all.slice(3, 8);
+  const rest     = all.slice(8);
+
+  const podiumHtml = top3.length
+    ? `<div class="lb-podium-row">${top3.map((c,i)=>podiumCard(c,i)).join('')}</div>`
+    : `<p style="text-align:center;color:var(--text-muted,#5e7060);padding:1rem 0;">No nominees yet</p>`;
+
+  const next5Html = next5.length
+    ? `<div class="lb-list-box">${next5.map((c,i)=>listRow(c,i+3,maxVotes)).join('')}</div>`
+    : '';
+
+  const restHtml = rest.length
+    ? `<div class="lb-rest" id="rest-${block.category.slug}">
+         <div class="lb-list-box">${rest.map((c,i)=>listRow(c,i+8,maxVotes)).join('')}</div>
+       </div>
+       <button class="lb-show-all-btn" onclick="toggleRest('${block.category.slug}',this)">
+         Show all ${all.length} nominees
+       </button>`
+    : '';
+
+  return `
+    <div class="lb-cat-section">
+      <div class="lb-cat-header">
+        <div class="lb-cat-orb">${CAT_ICONS[block.category.slug]||''}</div>
+        <span class="lb-cat-name">${block.category.name}</span>
+        <a href="${block.category.slug}.html" class="lb-vote-btn">Vote</a>
+      </div>
+      ${podiumHtml}
+      ${next5Html}
+      ${restHtml}
+    </div>
+    <div class="lb-separator"></div>`;
+}
+
+function toggleRest(slug, btn) {
+  const el = document.getElementById('rest-' + slug);
+  if (!el) return;
+  el.classList.toggle('open');
+  btn.textContent = el.classList.contains('open') ? 'Hide full list' : btn.textContent;
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  const container = document.getElementById('lb-container');
   try {
     const r = await apiFetch('/voting/leaderboard');
-    const container = document.getElementById('lb-container');
     if (!r.ok || !r.data.data) throw new Error();
-
-    container.innerHTML = r.data.data.map(block => {
-      const all = [...(block.podium || []), ...(block.rest || [])];
-      const emptyState = `
-        <div class="empty-state" style="padding:2rem;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="6"/><path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.12"/></svg>
-          <p>No nominees yet</p>
-        </div>`;
-
-      return `
-        <div class="podium-section">
-          <div class="podium-header">
-            <div class="podium-icon">${CAT_ICONS[block.category.slug] || DEFAULT_ICON}</div>
-            <span class="podium-title">${block.category.name}</span>
-            <a href="${block.category.slug}.html" class="btn btn-outline btn-sm" style="margin-left:auto;">Vote</a>
-          </div>
-          ${all.length === 0 ? emptyState : (() => {
-            const maxVotes = all[0]?.vote_count || 1;
-            return `<div class="podium-grid">
-              ${all.slice(0, 10).map((con, i) => `
-                <div class="podium-card ${CARD_CLASS[i] || ''}">
-                  <div class="podium-pos ${RANK_CLASS[i] || ''}">${RANK_LABEL[i] || '#' + (i + 1)}</div>
-                  <div class="podium-img-wrap">
-                    ${con.avatar_url
-                      ? `<img class="podium-img" src="${con.avatar_url}" alt="${con.fullname}" onerror="this.outerHTML='${makeInitial(con.fullname).replace(/'/g, "\\'")}'">`
-                      : makeInitial(con.fullname)}
-                  </div>
-                  <div class="podium-body">
-                    <div class="podium-name">${con.fullname}</div>
-                    <div class="podium-votes">${(con.vote_count || 0).toLocaleString()} votes</div>
-                    <div style="height:5px;background:var(--bg-3);border-radius:3px;margin-top:.5rem;overflow:hidden;">
-                      <div style="height:100%;background:var(--gold);border-radius:3px;width:${Math.round((con.vote_count || 0) / maxVotes * 100)}%;transition:width 1s;"></div>
-                    </div>
-                  </div>
-                </div>`).join('')}
-            </div>`;
-          })()}
-        </div>`;
-    }).join('');
-
+    container.innerHTML = r.data.data.map(renderBlock).join('');
   } catch(e) {
-    document.getElementById('lb-container').innerHTML = '<p style="text-align:center;color:var(--crimson)">Failed to load leaderboard. Please refresh.</p>';
+    container.innerHTML = '<p style="text-align:center;color:#e03e3e;padding:2rem;">Failed to load. Please refresh.</p>';
   }
 });
 </script>
