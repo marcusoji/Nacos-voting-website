@@ -158,7 +158,7 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
   }
 
   // ── Call Paystack ────────────────────────────────────────
-  // tx.amount is stored in Naira. Paystack returns Kobo. Convert: × 100.
+  // Cast tx.amount explicitly to Number to eliminate any precision/string DB bugs
   const expectedKobo = Number(tx.amount) * 100;
 
   console.log('[VERIFY] Calling Paystack | ref:', ref, '| db_naira:', tx.amount, '| expected_kobo:', expectedKobo);
@@ -175,21 +175,24 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
     });
   }
 
+  // Extract variables safely for explicit validation tracing
+  const paystackTx = result.rawData;
+  const statusOk   = paystackTx?.status === 'success';
+  const refOk      = paystackTx?.reference === ref;
+  const currencyOk = paystackTx?.currency === 'NGN';
+  const amountOk   = Number(paystackTx?.amount) === Number(expectedKobo);
+
   // ── Paystack says payment did not succeed ────────────────
   if (!result.success) {
-    // Log what Paystack actually returned so we can debug
-    console.warn('[VERIFY] Payment not successful:', ref, {
-      paystackStatus  : result.rawData?.status,
-      paystackAmount  : result.rawData?.amount,
-      paystackRef     : result.rawData?.reference,
-      paystackCurrency: result.rawData?.currency,
-      amountOk        : result.amountOk
+    // FIX: Replaced broken "result.amountOk" references with local computed booleans
+    console.warn('[VERIFY] Payment not successful details:', ref, {
+      paystackStatus  : paystackTx?.status,
+      paystackAmount  : paystackTx?.amount,
+      paystackRef     : paystackTx?.reference,
+      paystackCurrency: paystackTx?.currency,
+      validationFlags : { statusOk, refOk, currencyOk, amountOk }
     });
 
-    // Only permanently mark failed if Paystack explicitly says the status is not success.
-    // If it's ONLY an amount mismatch and status IS success, we should still credit.
-    // (paystackService now returns success=true for status+ref+currency match regardless of amount)
-    // So reaching here means status !== 'success' on Paystack's side.
     await supabase
       .from('transactions')
       .update({ status: 'failed', updated_at: new Date().toISOString() })
@@ -203,7 +206,7 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
   }
 
   // ── Paystack confirmed success — record votes atomically ─
-  console.log('[VERIFY] Paystack confirmed success | ref:', ref, '| amountOk:', result.amountOk);
+  console.log('[VERIFY] Paystack confirmed success | ref:', ref, '| amountOk:', amountOk);
 
   const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
     p_tx_ref: ref,
@@ -215,7 +218,6 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
 
   if (rpcErr) {
     console.error('[VERIFY RPC ERROR]', rpcErr.message, '| ref:', ref);
-    // Payment succeeded — don't tell user it failed, support can fix manually
     return res.json({
       success      : true,
       message      : `Payment confirmed! Votes are being recorded. If the leaderboard doesn't update in 1 minute, quote ref ${ref} to support.`,
@@ -226,7 +228,6 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
   }
 
   if (!processed) {
-    // Webhook already handled this — that's fine
     console.log('[VERIFY] Already processed by webhook:', ref);
     return res.json({
       success      : true,
