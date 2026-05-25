@@ -6,18 +6,19 @@ const client = axios.create({
     Authorization  : `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
     'Content-Type' : 'application/json'
   },
-  timeout: 25_000 
+  timeout: 25_000  // 25s — Vercel functions have 30s limit; give Paystack plenty of time
 });
 
 module.exports = {
 
   async initializeTx(email, amountInKobo, reference, metadata = {}) {
+    // Strip trailing slash so callback never becomes double-slash
     const frontendBase = (process.env.FRONTEND_URL || '')
       .split(',')[0].trim().replace(/\/+$/, '');
 
     const payload = {
       email,
-      amount      : Number(amountInKobo), // Ensure it's a number
+      amount      : Number(amountInKobo), // Type-safe cast
       reference,
       currency    : 'NGN',
       metadata,
@@ -31,28 +32,22 @@ module.exports = {
       email
     });
 
-    try {
-      const response = await client.post('/transaction/initialize', payload);
-      // Return Paystack's inner data object directly for cleaner frontend usage
-      return response.data; 
-    } catch (err) {
-      console.error('[PAYSTACK INIT ERROR]', err.response?.data || err.message);
-      throw err;
-    }
+    const response = await client.post('/transaction/initialize', payload);
+    return response.data;
   },
 
   async verifyTx(reference, expectedAmountInKobo) {
+    // Wrap in try/catch so a network error returns { success: false }
+    // instead of throwing — prevents marking transactions as failed incorrectly
     try {
       const response = await client.get(
         `/transaction/verify/${encodeURIComponent(reference)}`
       );
-      
-      const paystackResponse = response.data;
-      const tx = paystackResponse?.data;
+      const tx = response.data?.data;
 
-      if (!paystackResponse?.status || !tx) {
-        console.error('[PAYSTACK VERIFY] Paystack rejected query:', paystackResponse);
-        return { success: false, reason: 'invalid_reference' };
+      if (!tx) {
+        console.error('[PAYSTACK VERIFY] No data in response:', response.data);
+        return { success: false, reason: 'empty_response' };
       }
 
       console.log('[PAYSTACK VERIFY] Raw response:', {
@@ -66,15 +61,13 @@ module.exports = {
       const statusOk   = tx.status    === 'success';
       const refOk      = tx.reference === reference;
       const currencyOk = tx.currency  === 'NGN';
-      // FIX: Force both to numbers to avoid string vs number mismatch
+      // FIX: Force both sides to Numbers to avoid string vs number mismatch from DB or JSON
       const amountOk   = Number(tx.amount) === Number(expectedAmountInKobo);
 
       if (!statusOk || !refOk || !currencyOk || !amountOk) {
-        console.warn('[PAYSTACK VERIFY] Validation failed details:', {
+        console.warn('[PAYSTACK VERIFY] Validation failed:', {
           statusOk, refOk, currencyOk, amountOk,
-          gotStatus: tx.status,
-          gotAmount: tx.amount, expected: expectedAmountInKobo,
-          gotCurrency: tx.currency
+          gotAmount: tx.amount, expected: expectedAmountInKobo
         });
       }
 
@@ -84,20 +77,16 @@ module.exports = {
       };
 
     } catch (err) {
-      // Catching 404s/400s specifically from Paystack API
-      if (err.response) {
-        console.error('[PAYSTACK VERIFY API ERROR]', {
-          status: err.response.status,
-          data: err.response.data
-        });
-        return { success: false, reason: 'api_error', details: err.response.data };
-      }
-
-      // True network/timeout errors
-      console.error('[PAYSTACK VERIFY NETWORK ERROR]', err.message, {
+      // Network/timeout error — do NOT mark transaction as failed
+      // The transaction may be genuinely successful; webhook will handle it
+      console.error('[PAYSTACK VERIFY ERROR]', err.message, {
         reference,
-        isTimeout: err.code === 'ECONNABORTED'
+        isTimeout: err.code === 'ECONNABORTED',
+        status: err.response?.status,
+        data: err.response?.data
       });
+      // Return a special flag so the caller knows this was a network error
+      // not a genuine payment failure
       return { success: false, reason: 'network_error', networkError: true };
     }
   }
