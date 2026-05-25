@@ -6,19 +6,18 @@ const client = axios.create({
     Authorization  : `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
     'Content-Type' : 'application/json'
   },
-  timeout: 25_000  // 25s — Vercel functions have 30s limit; give Paystack plenty of time
+  timeout: 25_000 
 });
 
 module.exports = {
 
   async initializeTx(email, amountInKobo, reference, metadata = {}) {
-    // Strip trailing slash so callback never becomes double-slash
     const frontendBase = (process.env.FRONTEND_URL || '')
       .split(',')[0].trim().replace(/\/+$/, '');
 
     const payload = {
       email,
-      amount      : amountInKobo,
+      amount      : Number(amountInKobo), // Ensure it's a number
       reference,
       currency    : 'NGN',
       metadata,
@@ -27,27 +26,33 @@ module.exports = {
 
     console.log('[PAYSTACK INIT] Sending:', {
       reference,
-      amountKobo: amountInKobo,
+      amountKobo: payload.amount,
       callback_url: payload.callback_url,
       email
     });
 
-    const response = await client.post('/transaction/initialize', payload);
-    return response.data;
+    try {
+      const response = await client.post('/transaction/initialize', payload);
+      // Return Paystack's inner data object directly for cleaner frontend usage
+      return response.data; 
+    } catch (err) {
+      console.error('[PAYSTACK INIT ERROR]', err.response?.data || err.message);
+      throw err;
+    }
   },
 
   async verifyTx(reference, expectedAmountInKobo) {
-    // Wrap in try/catch so a network error returns { success: false }
-    // instead of throwing — prevents marking transactions as failed incorrectly
     try {
       const response = await client.get(
         `/transaction/verify/${encodeURIComponent(reference)}`
       );
-      const tx = response.data?.data;
+      
+      const paystackResponse = response.data;
+      const tx = paystackResponse?.data;
 
-      if (!tx) {
-        console.error('[PAYSTACK VERIFY] No data in response:', response.data);
-        return { success: false, reason: 'empty_response' };
+      if (!paystackResponse?.status || !tx) {
+        console.error('[PAYSTACK VERIFY] Paystack rejected query:', paystackResponse);
+        return { success: false, reason: 'invalid_reference' };
       }
 
       console.log('[PAYSTACK VERIFY] Raw response:', {
@@ -61,12 +66,15 @@ module.exports = {
       const statusOk   = tx.status    === 'success';
       const refOk      = tx.reference === reference;
       const currencyOk = tx.currency  === 'NGN';
-      const amountOk   = Number(tx.amount) === expectedAmountInKobo;
+      // FIX: Force both to numbers to avoid string vs number mismatch
+      const amountOk   = Number(tx.amount) === Number(expectedAmountInKobo);
 
       if (!statusOk || !refOk || !currencyOk || !amountOk) {
-        console.warn('[PAYSTACK VERIFY] Validation failed:', {
+        console.warn('[PAYSTACK VERIFY] Validation failed details:', {
           statusOk, refOk, currencyOk, amountOk,
-          gotAmount: tx.amount, expected: expectedAmountInKobo
+          gotStatus: tx.status,
+          gotAmount: tx.amount, expected: expectedAmountInKobo,
+          gotCurrency: tx.currency
         });
       }
 
@@ -76,16 +84,20 @@ module.exports = {
       };
 
     } catch (err) {
-      // Network/timeout error — do NOT mark transaction as failed
-      // The transaction may be genuinely successful; webhook will handle it
-      console.error('[PAYSTACK VERIFY ERROR]', err.message, {
+      // Catching 404s/400s specifically from Paystack API
+      if (err.response) {
+        console.error('[PAYSTACK VERIFY API ERROR]', {
+          status: err.response.status,
+          data: err.response.data
+        });
+        return { success: false, reason: 'api_error', details: err.response.data };
+      }
+
+      // True network/timeout errors
+      console.error('[PAYSTACK VERIFY NETWORK ERROR]', err.message, {
         reference,
-        isTimeout: err.code === 'ECONNABORTED',
-        status: err.response?.status,
-        data: err.response?.data
+        isTimeout: err.code === 'ECONNABORTED'
       });
-      // Return a special flag so the caller knows this was a network error
-      // not a genuine payment failure
       return { success: false, reason: 'network_error', networkError: true };
     }
   }
