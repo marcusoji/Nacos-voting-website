@@ -10,125 +10,158 @@
 <div class="page-wrap">
   <div class="success-page">
     <div class="success-card" id="success-card">
-      <div id="success-icon-wrap" class="success-icon wait" style="margin:0 auto 1.25rem;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+
+      <div id="s-icon" class="success-icon wait" style="margin:0 auto 1.25rem;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/>
         </svg>
       </div>
+
       <h1 class="success-title" id="s-title">Verifying Payment&#8230;</h1>
-      <p class="success-msg" id="s-msg">Please wait while we confirm your transaction with Paystack.</p>
+      <p  class="success-msg"   id="s-msg">Please wait while we confirm your transaction.</p>
+      <div id="s-extra"></div>
+
     </div>
   </div>
 </div>
 
 <script src="app.js"></script>
 <script>
-const ICON_OK   = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-const ICON_ERR  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-const ICON_WAIT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+/* ---------- icon helpers ---------- */
+const ICONS = {
+  ok  : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+  err : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+  wait: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`
+};
 
 function setIcon(type) {
-  const el = document.getElementById('success-icon-wrap');
-  el.className = `success-icon ${type}`;
-  el.innerHTML = { ok: ICON_OK, err: ICON_ERR, wait: ICON_WAIT }[type] || ICON_WAIT;
+  const el = document.getElementById('s-icon');
+  el.className  = `success-icon ${type}`;
+  el.innerHTML  = ICONS[type] || ICONS.wait;
+}
+function setTitle(t) { document.getElementById('s-title').textContent = t; }
+function setMsg(m)   { document.getElementById('s-msg').innerHTML    = m; }
+function setExtra(h) { document.getElementById('s-extra').innerHTML  = h; }
+
+function actionBtns(ref) {
+  return `
+    <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1.25rem;">
+      <a href="leaderboard.html" class="btn btn-primary">View Standings</a>
+      <a href="categories.html"  class="btn btn-outline">Vote Again</a>
+    </div>`;
 }
 
-let retryCount = 0;
-const MAX_RETRIES = 3;
+function refBadge(ref) {
+  return `<div class="success-ref" style="margin-top:.9rem;">Ref: ${ref}</div>`;
+}
 
-async function verifyPayment() {
-  const params = new URLSearchParams(window.location.search);
-  // Paystack sends both 'reference' and 'trxref' — read either
-  const ref = params.get('reference') || params.get('trxref');
-  const card = document.getElementById('success-card');
+/* ---------- main verify logic ---------- */
+let attempts = 0;
+const MAX    = 5;          // retry up to 5 times (covers Vercel cold-start lag)
+const DELAY  = 4000;       // 4 s between retries
 
+async function verify() {
+  const params = new URLSearchParams(location.search);
+  const ref    = params.get('reference') || params.get('trxref');
+
+  /* No reference in URL at all */
   if (!ref) {
     setIcon('err');
-    document.getElementById('s-title').textContent = 'Invalid Link';
-    document.getElementById('s-msg').textContent   = 'No payment reference found. If you just paid, go to your leaderboard to confirm your vote was recorded.';
-    card.insertAdjacentHTML('beforeend', `
-      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1.5rem;">
+    setTitle('No Reference Found');
+    setMsg('Paystack did not return a transaction reference. If you paid, check your email for a receipt, or contact support.');
+    setExtra(`
+      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
         <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
         <a href="categories.html"  class="btn btn-outline">Back to Voting</a>
       </div>`);
     return;
   }
 
+  attempts++;
+  setMsg(attempts > 1
+    ? `Retrying verification (attempt ${attempts}/${MAX})&#8230;`
+    : 'Confirming with Paystack&#8230;');
+
+  let r;
   try {
-    const r = await apiFetch(`/voting/verify/${ref}`);
-
-    if (r.ok && r.data.success) {
-      setIcon('ok');
-      document.getElementById('s-title').textContent = 'Votes Recorded!';
-      document.getElementById('s-msg').innerHTML =
-        `Your <strong>${r.data.quantity || ''} vote(s)</strong> have been successfully recorded. Thank you for participating in DELSU NACOS Awards 2026!`;
-      card.insertAdjacentHTML('beforeend', `
-        <div class="success-ref">Ref: ${ref}</div>
-        <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1.25rem;">
-          <a href="leaderboard.html" class="btn btn-primary">View Standings</a>
-          <a href="categories.html"  class="btn btn-outline">Vote Again</a>
-        </div>`);
-      // Remove only the paid item from the cart
-      if (r.data.contestantId) Cart.removeById(r.data.contestantId);
-      else Cart.clear();
-
-    } else if (r.status === 404 && retryCount < MAX_RETRIES) {
-      // Transaction may still be processing — retry after delay
-      retryCount++;
-      document.getElementById('s-msg').textContent =
-        `Confirming your payment (attempt ${retryCount}/${MAX_RETRIES})&#8230;`;
-      setTimeout(verifyPayment, 3000);
-
-    } else {
-      setIcon('err');
-      document.getElementById('s-title').textContent = 'Verification Issue';
-      document.getElementById('s-msg').textContent   =
-        r.data.message || 'Could not verify payment automatically.';
-      card.insertAdjacentHTML('beforeend', `
-        <div class="success-ref">Ref: ${ref}</div>
-        <p style="font-size:.8rem;color:var(--text-muted);margin-top:.75rem;">
-          If money was deducted, your votes are likely recorded via our webhook.
-          Check the leaderboard or contact support quoting your reference above.
-        </p>
-        <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
-          <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
-          <button onclick="retryVerify('${ref}')" class="btn btn-outline">Retry Verification</button>
-        </div>`);
-    }
+    r = await apiFetch(`/voting/verify/${ref}`);
   } catch (e) {
-    if (retryCount < MAX_RETRIES) {
-      retryCount++;
-      document.getElementById('s-msg').textContent =
-        `Network issue — retrying (${retryCount}/${MAX_RETRIES})&#8230;`;
-      setTimeout(verifyPayment, 4000);
-    } else {
-      setIcon('err');
-      document.getElementById('s-title').textContent = 'Network Error';
-      document.getElementById('s-msg').textContent   =
-        'Could not connect to verify your payment. If money was deducted, your vote is likely recorded. Check the leaderboard.';
-      card.insertAdjacentHTML('beforeend', `
-        <div class="success-ref">Ref: ${ref}</div>
-        <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
-          <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
-          <button onclick="retryVerify('${ref}')" class="btn btn-outline">Retry</button>
-        </div>`);
-    }
+    r = { ok: false, status: 0, data: { message: 'Network error', networkError: true } };
+  }
+
+  /* ── SUCCESS ── */
+  if (r.ok && r.data.success) {
+    setIcon('ok');
+    setTitle('Votes Recorded!');
+    setMsg(`Your <strong>${r.data.quantity || ''} vote(s)</strong> have been recorded. Thank you for participating!`);
+    setExtra(refBadge(ref) + actionBtns(ref));
+    /* Remove only the paid contestant from cart */
+    if (r.data.contestantId) Cart.removeById(r.data.contestantId);
+    else Cart.clear();
+    return;
+  }
+
+  /* ── NETWORK / TIMEOUT — retry silently ── */
+  const netErr = r.data?.networkError || r.status === 503 || r.status === 0;
+  if (netErr && attempts < MAX) {
+    setMsg(`Payment gateway is slow to respond — retrying (${attempts}/${MAX})&#8230;`);
+    setTimeout(verify, DELAY);
+    return;
+  }
+
+  /* ── TX NOT FOUND YET — may be Vercel cold start lag, retry ── */
+  if (r.status === 404 && attempts < MAX) {
+    setMsg(`Payment processing — confirming (${attempts}/${MAX})&#8230;`);
+    setTimeout(verify, DELAY);
+    return;
+  }
+
+  /* ── GENUINE FAILURE or retries exhausted ── */
+  setIcon('err');
+
+  if (r.status === 400) {
+    /* Paystack says the payment actually failed / was cancelled */
+    setTitle('Payment Not Completed');
+    setMsg(r.data.message || 'The payment did not go through. No charge was made.');
+    setExtra(`
+      ${refBadge(ref)}
+      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+        <a href="checkout.html"  class="btn btn-gold">Try Again</a>
+        <a href="categories.html" class="btn btn-outline">Back to Voting</a>
+      </div>`);
+  } else {
+    /* Network error exhausted or unknown — don't call it a failure */
+    setTitle('Verification Pending');
+    setMsg('We could not automatically confirm your payment right now. If money was deducted, your votes are most likely recorded. Check the leaderboard or try the button below.');
+    setExtra(`
+      ${refBadge(ref)}
+      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+        <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
+        <button onclick="resetAndRetry('${ref}')" class="btn btn-outline">Retry Now</button>
+      </div>
+      <p style="font-size:.75rem;color:var(--text-muted);margin-top:.75rem;">
+        Still stuck? Email support quoting the reference above.
+      </p>`);
   }
 }
 
-function retryVerify(ref) {
-  retryCount = 0;
-  // Reset UI
+function resetAndRetry(ref) {
+  attempts = 0;
   setIcon('wait');
-  document.getElementById('s-title').textContent = 'Retrying Verification&#8230;';
-  document.getElementById('s-msg').textContent   = 'Please wait.';
-  // Remove dynamically added elements
-  const card = document.getElementById('success-card');
-  card.querySelectorAll('.success-ref, div[style]').forEach(el => el.remove());
-  verifyPayment();
+  setTitle('Retrying Verification&#8230;');
+  setMsg('Please wait.');
+  setExtra('');
+  verify();
 }
 
-document.addEventListener('DOMContentLoaded', verifyPayment);
+document.addEventListener('DOMContentLoaded', verify);
 </script>
 </body>
 </html>
