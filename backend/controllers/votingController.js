@@ -87,8 +87,8 @@ exports.initializePayment = asyncHandler(async (req, res) => {
   }
 
   const reference    = makeRef();
-  const amountInKobo = qty * 100 * 100;   // qty × ₦100 × 100 kobo/naira
-  const amountNaira  = qty * 100;          // stored in DB
+  const amountInKobo = qty * 50 * 100;   // qty × ₦50 × 100 kobo/naira
+  const amountNaira  = qty * 50;          // stored in DB
 
   const paymentData = await paystackService.initializeTx(email, amountInKobo, reference, {
     contestantId, categoryId, quantity: qty, contestantName: contestant.fullname
@@ -100,7 +100,7 @@ exports.initializePayment = asyncHandler(async (req, res) => {
   await supabase.from('transactions').insert([{
     user_id      : req.user?.id || null,
     reference,
-    amount       : amountNaira,    // ← Naira in DB (e.g. 100 for 1 vote)
+    amount       : amountNaira,    // ← Naira in DB (e.g. 50 for 1 vote)
     quantity     : qty,
     contestant_id: contestantId,
     category_id  : categoryId,
@@ -248,7 +248,199 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
   });
 });
 
-// ── POST /api/voting/webhook ─────────────────────────────────
+
+// ── POST /api/voting/initialize-batch ───────────────────────
+// Accepts: { items: [{contestantId, categoryId, quantity}], email }
+// Initialises ONE Paystack payment for the full cart total.
+exports.initializeBatchPayment = asyncHandler(async (req, res) => {
+  const { items, email: guestEmail } = req.body;
+
+  if (!Array.isArray(items) || items.length === 0)
+    return res.status(400).json({ message: 'items array is required and must not be empty.' });
+
+  if (items.length > 20)
+    return res.status(400).json({ message: 'Maximum 20 contestants per batch.' });
+
+  const email = resolveEmail(req) || guestEmail;
+  if (!email)
+    return res.status(400).json({ message: 'An email address is required.' });
+
+  // Validate every contestant
+  const resolved = [];
+  for (const it of items) {
+    const { contestantId, categoryId, quantity } = it;
+    if (!contestantId || !categoryId || !quantity)
+      return res.status(400).json({ message: 'Each item needs contestantId, categoryId, and quantity.' });
+
+    const qty = parseInt(quantity, 10);
+    if (isNaN(qty) || qty < 1 || qty > 1000)
+      return res.status(400).json({ message: `Quantity for item must be 1–1000 (got ${quantity}).` });
+
+    const { data: contestant, error } = await supabase
+      .from('contestants')
+      .select('id, fullname, category_id')
+      .eq('id', contestantId)
+      .eq('category_id', categoryId)
+      .single();
+    if (error || !contestant)
+      return res.status(404).json({ message: `Contestant ${contestantId} not found in category ${categoryId}.` });
+
+    resolved.push({ contestantId, categoryId, qty, contestantName: contestant.fullname });
+  }
+
+  // Build one batch reference (BT- prefix so verify logic can distinguish)
+  const batchReference = `BT-${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
+
+  const PRICE_NAIRA = 50;
+  const totalNaira  = resolved.reduce((s, i) => s + i.qty * PRICE_NAIRA, 0);
+  const totalKobo   = totalNaira * 100;
+
+  const paymentData = await paystackService.initializeTx(email, totalKobo, batchReference, {
+    batch      : true,
+    itemCount  : resolved.length,
+    batchItems : resolved.map(i => ({ contestantId: i.contestantId, qty: i.qty, name: i.contestantName }))
+  });
+
+  if (!paymentData?.data?.authorization_url)
+    return res.status(502).json({ message: 'Payment gateway failed to initialize. Please try again.' });
+
+  // Insert one transaction row per contestant (each pending, same batch ref)
+  const txRows = resolved.map(i => ({
+    user_id        : req.user?.id || null,
+    reference      : `${batchReference}-${i.contestantId}`,  // unique per row
+    batch_reference: batchReference,                          // shared across batch
+    amount         : i.qty * PRICE_NAIRA,
+    quantity       : i.qty,
+    contestant_id  : i.contestantId,
+    category_id    : i.categoryId,
+    status         : 'pending',
+    metadata       : {
+      email,
+      contestantName : i.contestantName,
+      amount_naira   : i.qty * PRICE_NAIRA,
+      amount_kobo    : i.qty * PRICE_NAIRA * 100,
+      batch_reference: batchReference,
+      userAgent      : req.headers['user-agent'],
+      ip             : req.ip
+    }
+  }));
+
+  const { error: insertErr } = await supabase.from('transactions').insert(txRows);
+  if (insertErr) {
+    console.error('[BATCH INIT] DB insert error:', insertErr.message);
+    return res.status(500).json({ message: 'Failed to save transaction records.' });
+  }
+
+  console.log('[BATCH INIT] ref:', batchReference, '| items:', resolved.length, '| total naira:', totalNaira);
+  res.json({
+    success          : true,
+    authorization_url: paymentData.data.authorization_url,
+    batchReference,
+    totalNaira,
+    items            : resolved
+  });
+});
+
+// ── GET /api/voting/verify-batch/:batchReference ─────────────
+exports.verifyBatchPayment = asyncHandler(async (req, res) => {
+  const { batchReference } = req.params;
+
+  if (!batchReference || !/^BT-[A-Fa-f0-9]{16}$/i.test(batchReference))
+    return res.status(400).json({ message: 'Invalid batch reference format.' });
+
+  const batchRef = batchReference.toUpperCase();
+
+  // Fetch all transaction rows for this batch
+  const { data: txRows, error: txErr } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('batch_reference', batchRef);
+
+  if (txErr || !txRows || txRows.length === 0) {
+    console.warn('[BATCH VERIFY] Not found:', batchRef, txErr?.message);
+    return res.status(404).json({
+      message: 'Batch not found. Payment may still be processing — please wait and refresh.'
+    });
+  }
+
+  // Idempotent — all already processed
+  if (txRows.every(tx => tx.status === 'success')) {
+    return res.json({
+      success       : true,
+      message       : 'All votes already recorded.',
+      batchReference: batchRef,
+      items         : txRows.map(tx => ({
+        contestantId  : tx.contestant_id,
+        contestantName: tx.metadata?.contestantName || '',
+        categoryId    : tx.category_id,
+        quantity      : tx.quantity,
+        status        : 'success'
+      }))
+    });
+  }
+
+  // Verify against Paystack once (use the batch reference as Paystack reference)
+  const expectedKobo = txRows.reduce((s, tx) => s + Number(tx.amount) * 100, 0);
+  console.log('[BATCH VERIFY] Calling Paystack | batchRef:', batchRef, '| expected_kobo:', expectedKobo);
+
+  const result = await paystackService.verifyTx(batchRef, expectedKobo);
+
+  if (result.networkError) {
+    return res.status(503).json({
+      success      : false,
+      networkError : true,
+      message      : 'Could not reach payment gateway. Your payment may still be processing. Check back in 30 seconds.'
+    });
+  }
+
+  if (!result.success) {
+    // Mark all pending rows as failed
+    await supabase
+      .from('transactions')
+      .update({ status: 'failed', updated_at: new Date().toISOString() })
+      .eq('batch_reference', batchRef)
+      .eq('status', 'pending');
+
+    return res.status(400).json({
+      success: false,
+      message: 'Payment was not successful according to Paystack. No charge was made.'
+    });
+  }
+
+  // Paystack confirmed — process votes for each contestant individually
+  const results = [];
+  for (const tx of txRows) {
+    if (tx.status === 'success') {
+      results.push({ contestantId: tx.contestant_id, contestantName: tx.metadata?.contestantName, quantity: tx.quantity, status: 'already_recorded' });
+      continue;
+    }
+
+    const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
+      p_tx_ref: tx.reference,
+      p_cat_id: tx.category_id,
+      p_con_id: tx.contestant_id,
+      p_usr_id: tx.user_id || null,
+      p_qty   : tx.quantity
+    });
+
+    if (rpcErr) {
+      console.error('[BATCH VERIFY RPC]', rpcErr.message, '| ref:', tx.reference);
+      results.push({ contestantId: tx.contestant_id, contestantName: tx.metadata?.contestantName, quantity: tx.quantity, status: 'rpc_error' });
+    } else {
+      results.push({ contestantId: tx.contestant_id, contestantName: tx.metadata?.contestantName, quantity: tx.quantity, status: processed ? 'success' : 'already_recorded' });
+    }
+  }
+
+  const totalVotes = results.reduce((s, r) => s + r.quantity, 0);
+  console.log('[BATCH VERIFY] Done | batchRef:', batchRef, '| total votes:', totalVotes);
+
+  res.json({
+    success       : true,
+    message       : `${totalVotes} vote(s) recorded across ${results.length} contestant(s)!`,
+    batchReference: batchRef,
+    items         : results
+  });
+});
 exports.handleWebhook = asyncHandler(async (req, res) => {
   res.status(200).json({ received: true });
 

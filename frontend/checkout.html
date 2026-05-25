@@ -23,7 +23,7 @@
       <div class="checkout-items" id="checkout-items"></div>
 
       <div id="multi-note" style="display:none;background:rgba(201,161,74,.08);border:1px solid var(--border-gold);border-radius:var(--r);padding:.75rem 1rem;margin-bottom:1rem;font-size:.82rem;color:var(--gold);">
-        You have multiple nominees in your ballot. Each will be processed as a separate payment via Paystack.
+        You have multiple nominees in your ballot. All votes will be paid together in one single transaction.
       </div>
 
       <div class="checkout-summary">
@@ -39,7 +39,7 @@
           Pay with Paystack
         </button>
         <p style="text-align:center;font-size:.75rem;color:var(--text-muted);margin-top:.75rem;">
-          Secured by Paystack &middot; &#8358;100 per vote &middot; All payments are final
+          Secured by Paystack &middot; &#8358;50 per vote &middot; All payments are final
         </p>
       </div>
     </div>
@@ -101,24 +101,26 @@ async function handlePayment() {
   }
   if (items.length === 0) { Toast.error('Empty', 'Your ballot is empty.'); return; }
 
-  // Payments are per-contestant. Process first item; rest stay in cart.
-  const item = items[0];
-  if (items.length > 1) {
-    Toast.info('Note', `Processing votes for ${item.name} first.`);
-  }
-
   setLoading(btn, true);
   try {
-    const r = await apiFetch('/voting/initialize', {
+    // Build batch payload — all items in one request
+    const payload = {
+      email,
+      items: items.map(i => ({
+        contestantId: i.contestantId,
+        categoryId  : i.categoryId,
+        quantity    : i.quantity
+      }))
+    };
+
+    const r = await apiFetch('/voting/initialize-batch', {
       method: 'POST',
-      body: JSON.stringify({
-        contestantId: item.contestantId,
-        categoryId  : item.categoryId,
-        quantity    : item.quantity,
-        email
-      })
+      body: JSON.stringify(payload)
     });
+
     if (r.ok && r.data.authorization_url) {
+      // Store batch reference so payment-success page can verify all items
+      sessionStorage.setItem('nacos_batch_ref', r.data.batchReference);
       window.location.href = r.data.authorization_url;
     } else {
       Toast.error('Payment Error', r.data.message || 'Failed to initialize payment.');

@@ -4,7 +4,7 @@
 const _PROD_API = 'https://nacos-voting-website.vercel.app/api';
 const _isDev    = ['localhost', '127.0.0.1', ''].includes(location.hostname);
 window.API      = _isDev ? 'http://localhost:5000/api' : _PROD_API;
-window.PRICE    = 100;
+window.PRICE    = 50;  // ₦50 per vote
 
 // ── SVG icons ─────────────────────────────────────────────────
 const SVG = {
@@ -318,8 +318,8 @@ window.VoteModal = {
             <div class="qty-val" id="vm-qty">1</div>
             <button class="qty-btn" onclick="VoteModal.adjustQty(1)">&#43;</button>
           </div>
-          <div class="price-tag" id="vm-price">&#8358;100</div>
-          <div class="price-note">&#8358;100 per vote &middot; Max 1,000</div>
+          <div class="price-tag" id="vm-price">&#8358;50</div>
+          <div class="price-note">&#8358;50 per vote &middot; Max 1,000</div>
         </div>
         <button class="btn btn-gold btn-full btn-lg" onclick="VoteModal.addToCart()">Add to Ballot</button>
         <button class="btn btn-ghost btn-full mt-8" onclick="VoteModal.close()">Cancel</button>

@@ -64,14 +64,16 @@ function refBadge(ref) {
 
 /* ---------- main verify logic ---------- */
 let attempts = 0;
-const MAX    = 5;          // retry up to 5 times (covers Vercel cold-start lag)
-const DELAY  = 4000;       // 4 s between retries
+const MAX    = 5;
+const DELAY  = 4000;
+
+// Detect batch vs single reference
+function isBatchRef(ref) { return ref && ref.toUpperCase().startsWith('BT-'); }
 
 async function verify() {
   const params = new URLSearchParams(location.search);
   const ref    = params.get('reference') || params.get('trxref');
 
-  /* No reference in URL at all */
   if (!ref) {
     setIcon('err');
     setTitle('No Reference Found');
@@ -84,6 +86,15 @@ async function verify() {
     return;
   }
 
+  if (isBatchRef(ref)) {
+    await verifyBatch(ref);
+  } else {
+    await verifySingle(ref);
+  }
+}
+
+/* ---------- single payment verify (unchanged logic) ---------- */
+async function verifySingle(ref) {
   attempts++;
   setMsg(attempts > 1
     ? `Retrying verification (attempt ${attempts}/${MAX})&#8230;`
@@ -96,38 +107,31 @@ async function verify() {
     r = { ok: false, status: 0, data: { message: 'Network error', networkError: true } };
   }
 
-  /* ── SUCCESS ── */
   if (r.ok && r.data.success) {
     setIcon('ok');
     setTitle('Votes Recorded!');
     setMsg(`Your <strong>${r.data.quantity || ''} vote(s)</strong> have been recorded. Thank you for participating!`);
     setExtra(refBadge(ref) + actionBtns(ref));
-    /* Remove only the paid contestant from cart */
     if (r.data.contestantId) Cart.removeById(r.data.contestantId);
     else Cart.clear();
     return;
   }
 
-  /* ── NETWORK / TIMEOUT — retry silently ── */
   const netErr = r.data?.networkError || r.status === 503 || r.status === 0;
   if (netErr && attempts < MAX) {
     setMsg(`Payment gateway is slow to respond — retrying (${attempts}/${MAX})&#8230;`);
-    setTimeout(verify, DELAY);
+    setTimeout(() => verifySingle(ref), DELAY);
     return;
   }
 
-  /* ── TX NOT FOUND YET — may be Vercel cold start lag, retry ── */
   if (r.status === 404 && attempts < MAX) {
     setMsg(`Payment processing — confirming (${attempts}/${MAX})&#8230;`);
-    setTimeout(verify, DELAY);
+    setTimeout(() => verifySingle(ref), DELAY);
     return;
   }
 
-  /* ── GENUINE FAILURE or retries exhausted ── */
   setIcon('err');
-
   if (r.status === 400) {
-    /* Paystack says the payment actually failed / was cancelled */
     setTitle('Payment Not Completed');
     setMsg(r.data.message || 'The payment did not go through. No charge was made.');
     setExtra(`
@@ -137,9 +141,99 @@ async function verify() {
         <a href="categories.html" class="btn btn-outline">Back to Voting</a>
       </div>`);
   } else {
-    /* Network error exhausted or unknown — don't call it a failure */
     setTitle('Verification Pending');
     setMsg('We could not automatically confirm your payment right now. If money was deducted, your votes are most likely recorded. Check the leaderboard or try the button below.');
+    setExtra(`
+      ${refBadge(ref)}
+      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+        <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
+        <button onclick="resetAndRetry('${ref}')" class="btn btn-outline">Retry Now</button>
+      </div>
+      <p style="font-size:.75rem;color:var(--text-muted);margin-top:.75rem;">
+        Still stuck? Email support quoting the reference above.
+      </p>`);
+  }
+}
+
+/* ---------- batch payment verify ---------- */
+async function verifyBatch(ref) {
+  attempts++;
+  setMsg(attempts > 1
+    ? `Retrying batch verification (attempt ${attempts}/${MAX})&#8230;`
+    : 'Confirming your votes with Paystack&#8230;');
+
+  let r;
+  try {
+    r = await apiFetch(`/voting/verify-batch/${ref}`);
+  } catch (e) {
+    r = { ok: false, status: 0, data: { message: 'Network error', networkError: true } };
+  }
+
+  if (r.ok && r.data.success) {
+    setIcon('ok');
+    setTitle('All Votes Recorded!');
+
+    const items = r.data.items || [];
+    const totalVotes = items.reduce((s, i) => s + (i.quantity || 0), 0);
+    setMsg(`<strong>${totalVotes} vote(s)</strong> recorded across <strong>${items.length} nominee(s)</strong>. Thank you for participating!`);
+
+    // Build per-item detail table
+    const rows = items.map(i => `
+      <tr>
+        <td style="padding:.45rem .6rem;border-bottom:1px solid rgba(255,255,255,.07);">${i.contestantName || i.contestantId}</td>
+        <td style="padding:.45rem .6rem;border-bottom:1px solid rgba(255,255,255,.07);text-align:center;">${i.quantity}</td>
+        <td style="padding:.45rem .6rem;border-bottom:1px solid rgba(255,255,255,.07);text-align:center;">
+          <span style="color:${i.status==='success'||i.status==='already_recorded'?'#4ade80':'#f87171'};">
+            ${i.status==='success'||i.status==='already_recorded' ? '✓ Recorded' : '⚠ Check support'}
+          </span>
+        </td>
+      </tr>`).join('');
+
+    const table = `
+      <div style="margin:1rem 0;overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+          <thead>
+            <tr style="color:var(--gold);">
+              <th style="padding:.45rem .6rem;text-align:left;border-bottom:1px solid var(--border-gold);">Nominee</th>
+              <th style="padding:.45rem .6rem;text-align:center;border-bottom:1px solid var(--border-gold);">Votes</th>
+              <th style="padding:.45rem .6rem;text-align:center;border-bottom:1px solid var(--border-gold);">Status</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+
+    setExtra(table + refBadge(ref) + actionBtns(ref));
+    Cart.clear();
+    return;
+  }
+
+  const netErr = r.data?.networkError || r.status === 503 || r.status === 0;
+  if (netErr && attempts < MAX) {
+    setMsg(`Payment gateway is slow to respond — retrying (${attempts}/${MAX})&#8230;`);
+    setTimeout(() => verifyBatch(ref), DELAY);
+    return;
+  }
+
+  if (r.status === 404 && attempts < MAX) {
+    setMsg(`Payment processing — confirming (${attempts}/${MAX})&#8230;`);
+    setTimeout(() => verifyBatch(ref), DELAY);
+    return;
+  }
+
+  setIcon('err');
+  if (r.status === 400) {
+    setTitle('Payment Not Completed');
+    setMsg(r.data.message || 'The payment did not go through. No charge was made.');
+    setExtra(`
+      ${refBadge(ref)}
+      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+        <a href="checkout.html"  class="btn btn-gold">Try Again</a>
+        <a href="categories.html" class="btn btn-outline">Back to Voting</a>
+      </div>`);
+  } else {
+    setTitle('Verification Pending');
+    setMsg('We could not automatically confirm your payment. If money was deducted, your votes are most likely recorded. Check the leaderboard or retry below.');
     setExtra(`
       ${refBadge(ref)}
       <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
