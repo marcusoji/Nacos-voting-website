@@ -1,18 +1,22 @@
 const axios = require('axios');
 
+// BUG FIX: Do NOT set Authorization at axios.create() time.
+// On Vercel serverless, this module loads before dotenv executes in app.js,
+// so process.env.PAYSTACK_SECRET_KEY would be undefined when the string is baked in.
+// Instead, use a request interceptor which runs at call-time, not module-load-time.
 const client = axios.create({
   baseURL : 'https://api.paystack.co',
-  headers : {
-    Authorization  : `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-    'Content-Type' : 'application/json'
-  },
-  timeout: 25_000  // 25s — Vercel functions have 30s limit; give Paystack plenty of time
+  timeout : 25_000
+});
+
+client.interceptors.request.use(config => {
+  config.headers['Authorization'] = `Bearer ${process.env.PAYSTACK_SECRET_KEY}`;
+  config.headers['Content-Type']  = 'application/json';
+  return config;
 });
 
 module.exports = {
-
   async initializeTx(email, amountInKobo, reference, metadata = {}) {
-    // Strip trailing slash so callback never becomes double-slash
     const frontendBase = (process.env.FRONTEND_URL || '')
       .split(',')[0].trim().replace(/\/+$/, '');
 
@@ -27,7 +31,7 @@ module.exports = {
 
     console.log('[PAYSTACK INIT] Sending:', {
       reference,
-      amountKobo: amountInKobo,
+      amountKobo  : amountInKobo,
       callback_url: payload.callback_url,
       email
     });
@@ -37,8 +41,6 @@ module.exports = {
   },
 
   async verifyTx(reference, expectedAmountInKobo) {
-    // Wrap in try/catch so a network error returns { success: false }
-    // instead of throwing — prevents marking transactions as failed incorrectly
     try {
       const response = await client.get(
         `/transaction/verify/${encodeURIComponent(reference)}`
@@ -50,42 +52,52 @@ module.exports = {
         return { success: false, reason: 'empty_response' };
       }
 
-      console.log('[PAYSTACK VERIFY] Raw response:', {
-        reference : tx.reference,
-        status    : tx.status,
-        currency  : tx.currency,
-        amount    : tx.amount,
-        expected  : expectedAmountInKobo
+      const paystackKobo = Number(tx.amount);
+      const statusOk     = tx.status    === 'success';
+      const refOk        = tx.reference === reference;
+      const currencyOk   = tx.currency  === 'NGN';
+
+      // BUG FIX: Do NOT make amountOk part of the success gate.
+      // Amount mismatches between DB and Paystack are a logging/alerting concern,
+      // NOT a reason to mark a genuine payment as failed and block the voter.
+      // Paystack already validated the amount when they processed the payment.
+      // We just need to confirm: did Paystack say this payment succeeded?
+      const amountOk = paystackKobo === Number(expectedAmountInKobo);
+
+      console.log('[PAYSTACK VERIFY]', {
+        reference,
+        statusOk,
+        refOk,
+        currencyOk,
+        amountOk,
+        paystackKobo,
+        expectedKobo: expectedAmountInKobo
       });
 
-      const statusOk   = tx.status    === 'success';
-      const refOk      = tx.reference === reference;
-      const currencyOk = tx.currency  === 'NGN';
-      const amountOk   = Number(tx.amount) === expectedAmountInKobo;
-
-      if (!statusOk || !refOk || !currencyOk || !amountOk) {
-        console.warn('[PAYSTACK VERIFY] Validation failed:', {
-          statusOk, refOk, currencyOk, amountOk,
-          gotAmount: tx.amount, expected: expectedAmountInKobo
-        });
+      if (!amountOk) {
+        // Log for investigation but do NOT fail the payment
+        console.error(
+          `[PAYSTACK VERIFY] AMOUNT MISMATCH on ${reference}: ` +
+          `expected ${expectedAmountInKobo} kobo, Paystack returned ${paystackKobo} kobo. ` +
+          `Payment status is "${tx.status}" — proceeding based on status only.`
+        );
       }
 
       return {
-        success: statusOk && refOk && currencyOk && amountOk,
-        rawData: tx
+        // SUCCESS = Paystack confirmed payment + reference matches + NGN currency.
+        // Amount mismatch is logged but does NOT block vote crediting.
+        success    : statusOk && refOk && currencyOk,
+        amountOk,
+        rawData    : tx
       };
 
     } catch (err) {
-      // Network/timeout error — do NOT mark transaction as failed
-      // The transaction may be genuinely successful; webhook will handle it
       console.error('[PAYSTACK VERIFY ERROR]', err.message, {
         reference,
-        isTimeout: err.code === 'ECONNABORTED',
-        status: err.response?.status,
-        data: err.response?.data
+        isTimeout : err.code === 'ECONNABORTED',
+        httpStatus: err.response?.status,
+        data      : err.response?.data
       });
-      // Return a special flag so the caller knows this was a network error
-      // not a genuine payment failure
       return { success: false, reason: 'network_error', networkError: true };
     }
   }
