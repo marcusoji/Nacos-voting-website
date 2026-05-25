@@ -72,7 +72,10 @@ function isBatchRef(ref) { return ref && ref.toUpperCase().startsWith('BT-'); }
 
 async function verify() {
   const params = new URLSearchParams(location.search);
-  const ref    = params.get('reference') || params.get('trxref');
+ const ref =
+  params.get('reference') ||
+  params.get('trxref') ||
+  sessionStorage.getItem('nacos_batch_ref');
 
   if (!ref) {
     setIcon('err');
@@ -203,9 +206,12 @@ async function verifyBatch(ref) {
         </table>
       </div>`;
 
-    setExtra(table + refBadge(ref) + actionBtns(ref));
-    Cart.clear();
-    return;
+   setExtra(table + refBadge(ref) + actionBtns(ref));
+
+sessionStorage.removeItem('nacos_batch_ref');
+
+Cart.clear();
+return;
   }
 
   const netErr = r.data?.networkError || r.status === 503 || r.status === 0;

@@ -49,6 +49,13 @@ window.apiFetch = async (path, opts = {}) => {
       // NOTE: no 'credentials' needed — we use Bearer token, not cookies
     });
     const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+  console.error('[API ERROR]', {
+    path,
+    status: res.status,
+    data
+  });
+}
     return { ok: res.ok, status: res.status, data };
   } catch (err) {
     console.error('[apiFetch] Network error on', path, err.message);

@@ -264,6 +264,20 @@ exports.initializeBatchPayment = asyncHandler(async (req, res) => {
   const email = resolveEmail(req) || guestEmail;
   if (!email)
     return res.status(400).json({ message: 'An email address is required.' });
+  if (req.user) {
+  const { data: pending } = await supabase
+    .from('transactions')
+    .select('id')
+    .eq('user_id', req.user.id)
+    .eq('status', 'pending')
+    .limit(1);
+
+  if (pending && pending.length > 0) {
+    return res.status(400).json({
+      message: 'You already have a pending payment.'
+    });
+  }
+}
 
   // Validate every contestant
   const resolved = [];
@@ -345,9 +359,12 @@ exports.initializeBatchPayment = asyncHandler(async (req, res) => {
 exports.verifyBatchPayment = asyncHandler(async (req, res) => {
   const { batchReference } = req.params;
 
-  if (!batchReference || !/^BT-[A-Fa-f0-9]{16}$/i.test(batchReference))
-    return res.status(400).json({ message: 'Invalid batch reference format.' });
-
+ if (!batchReference || !/^BT-[A-Z0-9-]+$/i.test(batchReference)) {
+  return res.status(400).json({
+    success: false,
+    message: 'Invalid batch reference format.'
+  });
+}
   const batchRef = batchReference.toUpperCase();
 
   // Fetch all transaction rows for this batch
@@ -380,7 +397,10 @@ exports.verifyBatchPayment = asyncHandler(async (req, res) => {
   }
 
   // Verify against Paystack once (use the batch reference as Paystack reference)
-  const expectedKobo = txRows.reduce((s, tx) => s + Number(tx.amount) * 100, 0);
+  const expectedKobo = txRows.reduce(
+  (s, tx) => s + Math.round(Number(tx.amount) * 100),
+  0
+);
   console.log('[BATCH VERIFY] Calling Paystack | batchRef:', batchRef, '| expected_kobo:', expectedKobo);
 
   const result = await paystackService.verifyTx(batchRef, expectedKobo);

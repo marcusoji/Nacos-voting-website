@@ -94,7 +94,7 @@ async function handlePayment() {
   const items = Cart.get();
   const email = document.getElementById('checkout-email').value.trim();
   const btn   = document.getElementById('pay-btn');
-
+  if (btn.disabled) return;
   const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!email || !emailRe.test(email)) {
     Toast.error('Required', 'Please enter a valid email address.'); return;
@@ -109,7 +109,7 @@ async function handlePayment() {
       items: items.map(i => ({
         contestantId: i.contestantId,
         categoryId  : i.categoryId,
-        quantity    : i.quantity
+        quantity: Math.max(1, parseInt(i.quantity || 1, 10))
       }))
     };
 
@@ -127,7 +127,8 @@ async function handlePayment() {
       setLoading(btn, false, '\uD83D\uDD10 Pay with Paystack');
     }
   } catch(err) {
-    Toast.error('Error', 'Network error. Please try again.');
+console.error('[CHECKOUT ERROR]', err);
+Toast.error('Error', err.message || 'Network error. Please try again.');
     setLoading(btn, false, '\uD83D\uDD10 Pay with Paystack');
   }
 }
