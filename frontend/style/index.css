@@ -594,22 +594,58 @@
 }
 .lb-vote-btn:hover { background: rgba(201,161,74,.22); }
 
-/* Top 3 podium row */
+/* ============================================================
+   TOP 3 PODIUM LAYOUT
+   1st = center top
+   2nd = left slightly lower
+   3rd = right slightly lower
+   All same size
+   ============================================================ */
 .lb-podium-row {
-  display: grid; grid-template-columns: 1fr 1fr 1fr;
-  gap: .75rem; margin-bottom: 1.25rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding-top: 1rem;
 }
+
 .lb-podium-card {
-  border-radius: 16px; overflow: hidden;
-  background: var(--bg-1, #0f1712); border: 1px solid rgba(255,255,255,.07);
-  display: flex; flex-direction: column; text-align: center;
+  width: 31%;
+  max-width: 190px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--bg-1, #0f1712);
+  border: 1px solid rgba(255,255,255,.07);
+  display: flex;
+  flex-direction: column;
+  text-align: center;
   transition: transform .3s;
 }
-.lb-podium-card:hover { transform: translateY(-4px); }
-.lb-podium-card.p1 { border-color: rgba(201,161,74,.45); box-shadow: 0 4px 24px rgba(201,161,74,.18); }
-.lb-podium-card.p2 { border-color: rgba(192,192,192,.25); }
-.lb-podium-card.p3 { border-color: rgba(205,127,50,.25); }
 
+.lb-podium-card:hover {
+  transform: translateY(-4px);
+}
+
+/* 1st place in the middle and slightly higher */
+.lb-podium-card.p1 {
+  order: 2;
+  transform: translateY(-18px);
+  border-color: rgba(201,161,74,.45);
+  box-shadow: 0 4px 24px rgba(201,161,74,.18);
+}
+
+/* 2nd place on the left */
+.lb-podium-card.p2 {
+  order: 1;
+  border-color: rgba(192,192,192,.25);
+}
+
+/* 3rd place on the right */
+.lb-podium-card.p3 {
+  order: 3;
+  border-color: rgba(205,127,50,.25);
+}
 .lb-podium-rank {
   padding: .4rem .5rem;
   font-family: 'Playfair Display', serif;
@@ -717,6 +753,21 @@
   .lb-podium-card .lb-podium-name { font-size: .82rem; }
 }
 @media (max-width: 380px) {
-  .cats-grid { grid-template-columns: repeat(2, 1fr); gap: .9rem; padding: 1rem; }
-  .lb-podium-row { gap: .5rem; }
+  .cats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: .9rem;
+    padding: 1rem;
+  }
+
+  .lb-podium-row {
+    gap: .5rem;
+  }
+
+  .lb-podium-card {
+    width: 32%;
+  }
+
+  .lb-podium-card.p1 {
+    transform: translateY(-12px);
+  }
 }
