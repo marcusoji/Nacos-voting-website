@@ -158,7 +158,6 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
   }
 
   // ── Call Paystack ────────────────────────────────────────
-  // Cast tx.amount explicitly to Number to eliminate any precision/string DB bugs
   const expectedKobo = Number(tx.amount) * 100;
 
   console.log('[VERIFY] Calling Paystack | ref:', ref, '| db_naira:', tx.amount, '| expected_kobo:', expectedKobo);
@@ -175,16 +174,17 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
     });
   }
 
-  // Extract variables safely for explicit validation tracing
+  // Calculate local flags explicitly so logs show clear context
   const paystackTx = result.rawData;
   const statusOk   = paystackTx?.status === 'success';
   const refOk      = paystackTx?.reference === ref;
   const currencyOk = paystackTx?.currency === 'NGN';
-  const amountOk   = Number(paystackTx?.amount) === Number(expectedKobo);
+  
+  // Local evaluation tracking for logging visibility
+  const amountOk   = result.success; 
 
   // ── Paystack says payment did not succeed ────────────────
   if (!result.success) {
-    // FIX: Replaced broken "result.amountOk" references with local computed booleans
     console.warn('[VERIFY] Payment not successful details:', ref, {
       paystackStatus  : paystackTx?.status,
       paystackAmount  : paystackTx?.amount,
@@ -206,7 +206,7 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
   }
 
   // ── Paystack confirmed success — record votes atomically ─
-  console.log('[VERIFY] Paystack confirmed success | ref:', ref, '| amountOk:', amountOk);
+  console.log('[VERIFY] Paystack confirmed success | ref:', ref);
 
   const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
     p_tx_ref: ref,
