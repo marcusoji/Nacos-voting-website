@@ -1,19 +1,13 @@
 const axios = require('axios');
 
 const client = axios.create({
-  baseURL : 'https://api.paystack.co',
-  headers : {
-    Authorization  : `Beconst axios = require('axios');
-
-const client = axios.create({
-  baseURL : 'https://api.paystack.co',
-  headers : {
-    Authorization  : `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-    'Content-Type' : 'application/json'
+  baseURL: 'https://api.paystack.co',
+  headers: {
+    'Authorization': 'Bearer ' + process.env.PAYSTACK_SECRET_KEY,
+    'Content-Type': 'application/json'
   },
-  timeout: 25_000  // 25s — Vercel functions have 30s limit; give Paystack plenty of time
+  timeout: 25000
 });
-
 /**
  * Calculates what Paystack charges a customer when "Pass fees to customers" is enabled.
  * All math is processed in Kobo to completely avoid JavaScript floating-point issues.
