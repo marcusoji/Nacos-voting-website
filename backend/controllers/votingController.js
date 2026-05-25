@@ -3,7 +3,6 @@ const paystackService = require('../services/paystackService');
 const asyncHandler    = require('../utils/asyncHandler');
 const crypto          = require('crypto');
 
-// Always uppercase — consistent with DB storage and regex
 const makeRef = () => `VT-${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
 
 const resolveEmail = (req) => {
@@ -69,7 +68,6 @@ exports.initializePayment = asyncHandler(async (req, res) => {
     .eq('id', contestantId)
     .eq('category_id', categoryId)
     .single();
-
   if (conErr || !contestant)
     return res.status(404).json({ message: 'Contestant not found in this category.' });
 
@@ -90,6 +88,7 @@ exports.initializePayment = asyncHandler(async (req, res) => {
 
   const reference    = makeRef();
   const amountInKobo = qty * 100 * 100;   // qty × ₦100 × 100 kobo/naira
+  const amountNaira  = qty * 100;          // stored in DB
 
   const paymentData = await paystackService.initializeTx(email, amountInKobo, reference, {
     contestantId, categoryId, quantity: qty, contestantName: contestant.fullname
@@ -101,15 +100,22 @@ exports.initializePayment = asyncHandler(async (req, res) => {
   await supabase.from('transactions').insert([{
     user_id      : req.user?.id || null,
     reference,
-    amount       : qty * 100,   // store in Naira
+    amount       : amountNaira,    // ← Naira in DB (e.g. 100 for 1 vote)
     quantity     : qty,
     contestant_id: contestantId,
     category_id  : categoryId,
     status       : 'pending',
-    metadata     : { email, userAgent: req.headers['user-agent'], ip: req.ip }
+    metadata     : {
+      email,
+      contestantName : contestant.fullname,
+      amount_naira   : amountNaira,
+      amount_kobo    : amountInKobo,  // ← saved for debugging
+      userAgent      : req.headers['user-agent'],
+      ip             : req.ip
+    }
   }]);
 
-  console.log('[INIT] Transaction created:', reference, '| qty:', qty, '| kobo:', amountInKobo);
+  console.log('[INIT] ref:', reference, '| qty:', qty, '| naira:', amountNaira, '| kobo:', amountInKobo);
   res.json({ success: true, authorization_url: paymentData.data.authorization_url, reference });
 });
 
@@ -117,11 +123,9 @@ exports.initializePayment = asyncHandler(async (req, res) => {
 exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
   const { reference } = req.params;
 
-  // Accept both upper and lower case hex
   if (!reference || !/^VT-[A-Fa-f0-9]{16}$/i.test(reference))
     return res.status(400).json({ message: 'Invalid transaction reference format.' });
 
-  // Normalize to uppercase — DB always stores uppercase (makeRef uses toUpperCase)
   const ref = reference.toUpperCase();
 
   const { data: tx, error: txErr } = await supabase
@@ -134,49 +138,73 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
     });
   }
 
-  // Already done — return cached result (idempotent)
+  // Idempotent — already done
   if (tx.status === 'success') {
     console.log('[VERIFY] Already processed:', ref);
     return res.json({
-      success: true,
-      message: 'Votes already recorded.',
-      reference: ref,
-      quantity: tx.quantity,
-      contestantId: tx.contestant_id
+      success      : true,
+      message      : 'Votes already recorded.',
+      reference    : ref,
+      quantity     : tx.quantity,
+      contestantId : tx.contestant_id
     });
   }
 
   if (tx.status === 'failed') {
-    return res.status(400).json({ success: false, message: 'This transaction previously failed.' });
+    return res.status(400).json({
+      success: false,
+      message: 'This transaction previously failed. If you were charged, contact support with your reference.'
+    });
   }
 
-  // Call Paystack to verify — amount in DB is Naira, multiply by 100 for kobo
-  const expectedKobo = tx.amount * 100;
+  // ── Call Paystack ────────────────────────────────────────
+  // tx.amount is stored in Naira. Paystack returns Kobo. Convert: × 100.
+  const expectedKobo = Number(tx.amount) * 100;
+
+  console.log('[VERIFY] Calling Paystack | ref:', ref, '| db_naira:', tx.amount, '| expected_kobo:', expectedKobo);
+
   const result = await paystackService.verifyTx(ref, expectedKobo);
 
-  // KEY FIX: If verification failed due to network/timeout — do NOT mark as failed.
-  // The payment may be genuine; the webhook will record it when Paystack retries.
-  if (!result.success) {
-    if (result.networkError) {
-      console.warn('[VERIFY] Network error talking to Paystack — leaving as pending:', ref);
-      return res.status(503).json({
-        success: false,
-        networkError: true,
-        message: 'Could not reach payment gateway. Your payment may still be processing. Check back in 30 seconds.'
-      });
-    }
+  // ── Network/timeout error — do NOT mark as failed ────────
+  if (result.networkError) {
+    console.warn('[VERIFY] Network error from Paystack — leaving pending:', ref);
+    return res.status(503).json({
+      success      : false,
+      networkError : true,
+      message      : 'Could not reach payment gateway. Your payment may still be processing. Check back in 30 seconds.'
+    });
+  }
 
-    // Genuine payment failure (status !== 'success' from Paystack)
-    console.warn('[VERIFY] Paystack says payment failed:', ref);
-    await supabase.from('transactions').update({ status: 'failed', updated_at: new Date().toISOString() })
-      .eq('reference', ref);
+  // ── Paystack says payment did not succeed ────────────────
+  if (!result.success) {
+    // Log what Paystack actually returned so we can debug
+    console.warn('[VERIFY] Payment not successful:', ref, {
+      paystackStatus  : result.rawData?.status,
+      paystackAmount  : result.rawData?.amount,
+      paystackRef     : result.rawData?.reference,
+      paystackCurrency: result.rawData?.currency,
+      amountOk        : result.amountOk
+    });
+
+    // Only permanently mark failed if Paystack explicitly says the status is not success.
+    // If it's ONLY an amount mismatch and status IS success, we should still credit.
+    // (paystackService now returns success=true for status+ref+currency match regardless of amount)
+    // So reaching here means status !== 'success' on Paystack's side.
+    await supabase
+      .from('transactions')
+      .update({ status: 'failed', updated_at: new Date().toISOString() })
+      .eq('reference', ref)
+      .eq('status', 'pending'); // guard: only update if still pending
+
     return res.status(400).json({
       success: false,
       message: 'Payment was not successful according to Paystack. No charge was made.'
     });
   }
 
-  // Payment verified — record votes atomically via RPC
+  // ── Paystack confirmed success — record votes atomically ─
+  console.log('[VERIFY] Paystack confirmed success | ref:', ref, '| amountOk:', result.amountOk);
+
   const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
     p_tx_ref: ref,
     p_cat_id: tx.category_id,
@@ -187,39 +215,41 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
 
   if (rpcErr) {
     console.error('[VERIFY RPC ERROR]', rpcErr.message, '| ref:', ref);
-    // Don't mark as failed — the payment succeeded, we just had a DB issue
-    return res.status(500).json({
-      message: `Payment confirmed but vote recording hit an error. Quote ref ${ref} to support.`
+    // Payment succeeded — don't tell user it failed, support can fix manually
+    return res.json({
+      success      : true,
+      message      : `Payment confirmed! Votes are being recorded. If the leaderboard doesn't update in 1 minute, quote ref ${ref} to support.`,
+      reference    : ref,
+      quantity     : tx.quantity,
+      contestantId : tx.contestant_id
     });
   }
 
   if (!processed) {
-    // RPC returned false = webhook already processed this (race condition — fine)
+    // Webhook already handled this — that's fine
     console.log('[VERIFY] Already processed by webhook:', ref);
     return res.json({
-      success: true,
-      message: 'Votes already recorded.',
-      reference: ref,
-      quantity: tx.quantity,
-      contestantId: tx.contestant_id
+      success      : true,
+      message      : 'Votes already recorded.',
+      reference    : ref,
+      quantity     : tx.quantity,
+      contestantId : tx.contestant_id
     });
   }
 
   console.log('[VERIFY] Success! Votes recorded:', ref, '| qty:', tx.quantity);
   res.json({
-    success: true,
-    message: `${tx.quantity} vote(s) recorded successfully!`,
-    reference: ref,
-    quantity: tx.quantity,
-    contestantId: tx.contestant_id
+    success      : true,
+    message      : `${tx.quantity} vote(s) recorded successfully!`,
+    reference    : ref,
+    quantity     : tx.quantity,
+    contestantId : tx.contestant_id
   });
 });
 
 // ── POST /api/voting/webhook ─────────────────────────────────
-// Register in Paystack dashboard → Settings → Webhooks:
-// URL: https://nacos-voting-website.vercel.app/api/voting/webhook
 exports.handleWebhook = asyncHandler(async (req, res) => {
-  res.status(200).json({ received: true }); // acknowledge immediately
+  res.status(200).json({ received: true });
 
   try {
     const signature = req.headers['x-paystack-signature'];
@@ -253,11 +283,11 @@ exports.handleWebhook = asyncHandler(async (req, res) => {
     if (tx.status !== 'pending') { console.log('[WEBHOOK] Not pending, skip:', reference); return; }
 
     const { error: rpcErr } = await supabase.rpc('process_vote_transaction', {
-      p_tx_ref: reference.toUpperCase(),
-      p_cat_id: tx.category_id,
-      p_con_id: tx.contestant_id,
-      p_usr_id: tx.user_id || null,
-      p_qty   : tx.quantity
+      p_tx_ref : reference.toUpperCase(),
+      p_cat_id : tx.category_id,
+      p_con_id : tx.contestant_id,
+      p_usr_id : tx.user_id || null,
+      p_qty    : tx.quantity
     });
 
     if (rpcErr) { console.error('[WEBHOOK RPC]', rpcErr.message); return; }
