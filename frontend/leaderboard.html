@@ -52,17 +52,6 @@ function imgOrInitial(con, cls='') {
   return initial(con.fullname);
 }
 
-function podiumCard(con, rank) {
-  const cls = ['p1','p2','p3'][rank] || '';
-  const lbl = ['1st — Gold','2nd — Silver','3rd — Bronze'][rank] || `#${rank+1}`;
-  return `
-    <div class="lb-podium-card ${cls}">
-      <div class="lb-podium-rank">${lbl}</div>
-      <div class="lb-podium-img">${imgOrInitial(con,'')}</div>
-      <div class="lb-podium-name">${con.fullname}</div>
-      <div class="lb-podium-votes">${(con.vote_count||0).toLocaleString()}</div>
-    </div>`;
-}
 
 function listRow(con, rank, maxVotes) {
   const pct = maxVotes ? Math.round((con.vote_count||0)/maxVotes*100) : 0;
@@ -82,21 +71,82 @@ function listRow(con, rank, maxVotes) {
     </div>`;
 }
 
+/* ============================================================
+   Replace the podiumCard() and renderBlock() functions
+   in your leaderboard HTML <script> block with these.
+   Everything else in the script stays the same.
+   ============================================================ */
+
+function podiumCard1st(con) {
+  const img = con.avatar_url
+    ? `<img src="${con.avatar_url}" alt="${con.fullname}"
+           onerror="this.outerHTML='<div class=\\'lb-podium-initial\\'>${con.fullname.charAt(0).toUpperCase()}</div>'">`
+    : `<div class="lb-podium-initial">${con.fullname.charAt(0).toUpperCase()}</div>`;
+
+  return `
+    <div class="lb-podium-card p1">
+      <div class="lb-podium-img">
+        <div class="lb-podium-crown">👑</div>
+        ${img}
+      </div>
+      <div class="lb-podium-info">
+        <div class="lb-podium-rank">1st — Gold</div>
+        <div class="lb-podium-name">${con.fullname}</div>
+        <div class="lb-podium-votes">${(con.vote_count||0).toLocaleString()} votes</div>
+      </div>
+    </div>`;
+}
+
+function podiumCard2nd3rd(con, rank) {
+  const cls   = rank === 1 ? 'p2' : 'p3';
+  const label = rank === 1 ? '2nd — Silver' : '3rd — Bronze';
+  const img   = con.avatar_url
+    ? `<img src="${con.avatar_url}" alt="${con.fullname}"
+           onerror="this.outerHTML='<div class=\\'lb-podium-initial\\'>${con.fullname.charAt(0).toUpperCase()}</div>'">`
+    : `<div class="lb-podium-initial">${con.fullname.charAt(0).toUpperCase()}</div>`;
+
+  return `
+    <div class="lb-podium-card ${cls}">
+      <div class="lb-podium-img">${img}</div>
+      <div class="lb-podium-info">
+        <div class="lb-podium-rank">${label}</div>
+        <div class="lb-podium-name">${con.fullname}</div>
+        <div class="lb-podium-votes">${(con.vote_count||0).toLocaleString()} votes</div>
+      </div>
+    </div>`;
+}
+
 function renderBlock(block) {
   const all      = [...(block.podium||[]), ...(block.rest||[])];
   const maxVotes = all[0]?.vote_count || 1;
-  const top3     = all.slice(0, 3);
-  const next5    = all.slice(3, 8);
-  const rest     = all.slice(8);
+  const [first, second, third, ...remaining] = all;
+  const next5    = remaining.slice(0, 5);
+  const rest     = remaining.slice(5);
 
-  const podiumHtml = top3.length
-    ? `<div class="lb-podium-row">${top3.map((c,i)=>podiumCard(c,i)).join('')}</div>`
-    : `<p style="text-align:center;color:var(--text-muted,#5e7060);padding:1rem 0;">No nominees yet</p>`;
+  /* ── Top 3 ── */
+  let podiumHtml = '';
+  if (!first) {
+    podiumHtml = `<p style="text-align:center;color:var(--text-muted,#5e7060);padding:1rem 0;">No nominees yet</p>`;
+  } else {
+    const subRow = (second || third)
+      ? `<div class="lb-podium-row-sub">
+           ${second ? podiumCard2nd3rd(second, 1) : ''}
+           ${third  ? podiumCard2nd3rd(third,  2) : ''}
+         </div>`
+      : '';
+    podiumHtml = `
+      <div class="lb-podium-row">
+        ${podiumCard1st(first)}
+        ${subRow}
+      </div>`;
+  }
 
+  /* ── Ranks 4-8 ── */
   const next5Html = next5.length
     ? `<div class="lb-list-box">${next5.map((c,i)=>listRow(c,i+3,maxVotes)).join('')}</div>`
     : '';
 
+  /* ── Rest (9+) ── */
   const restHtml = rest.length
     ? `<div class="lb-rest" id="rest-${block.category.slug}">
          <div class="lb-list-box">${rest.map((c,i)=>listRow(c,i+8,maxVotes)).join('')}</div>
