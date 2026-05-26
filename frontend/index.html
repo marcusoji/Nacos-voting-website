@@ -101,19 +101,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   try {
-    const lb = await apiFetch('/leaderboard');
-    if (lb.ok && lb.data.data) {
-      let contestants = 0, votes = 0;
-      lb.data.data.forEach(b => {
-        contestants += (b.podium?.length || 0) + (b.rest?.length || 0);
-        [...(b.podium||[]), ...(b.rest||[])].forEach(c => votes += (c.vote_count||0));
-      });
-      const ce = document.getElementById('stat-contestants');
-      const ve = document.getElementById('stat-votes');
-      if (ce) { ce.dataset.count = contestants; ce.textContent = contestants; }
-      if (ve) { ve.dataset.count = votes; ve.textContent = votes; }
-      initCounters();
-    }
+  const lb = await apiFetch('/voting/leaderboard');   // ← was '/leaderboard'
+  if (lb.ok && lb.data.data) {
+    let contestants = 0, votes = 0;
+    lb.data.data.forEach(b => {
+      const all = [...(b.podium||[]), ...(b.rest||[])];
+      contestants += all.length;
+      all.forEach(c => votes += (c.vote_count || 0));
+    });
+
+    const ce = document.getElementById('stat-contestants');
+    const ve = document.getElementById('stat-votes');
+
+    if (ce) { ce.dataset.count = contestants; ce.textContent = contestants; }
+    if (ve) { ve.dataset.count = votes;        ve.textContent = votes; }
+
+    initCounters(); // ← moved inside here, after data-count is written
+  }
   } catch(e) {}
 });
 </script>
