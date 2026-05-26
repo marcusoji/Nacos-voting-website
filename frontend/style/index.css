@@ -606,45 +606,57 @@
   justify-content: center;
   align-items: flex-end;
   gap: 1rem;
-  margin-bottom: 1.5rem;
+  margin: 2rem 0;
   padding-top: 1rem;
 }
 
 .lb-podium-card {
-  width: 31%;
-  max-width: 190px;
-  border-radius: 16px;
+  width: 180px;
+  min-height: 250px;
+  border-radius: 18px;
   overflow: hidden;
-  background: var(--bg-1, #0f1712);
-  border: 1px solid rgba(255,255,255,.07);
+  background: linear-gradient(180deg, rgba(18,24,20,.96), rgba(10,14,11,.98));
+  border: 1px solid rgba(255,255,255,.06);
   display: flex;
   flex-direction: column;
   text-align: center;
-  transition: transform .3s;
+  position: relative;
+  transition: transform .25s ease, box-shadow .25s ease;
 }
 
 .lb-podium-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-8px);
 }
 
-/* 1st place in the middle and slightly higher */
+/* =========================
+   1ST PLACE (CENTER TOP)
+   ========================= */
 .lb-podium-card.p1 {
   order: 2;
-  transform: translateY(-18px);
-  border-color: rgba(201,161,74,.45);
-  box-shadow: 0 4px 24px rgba(201,161,74,.18);
+  margin-bottom: 40px;
+  border: 1px solid rgba(201,161,74,.45);
+  box-shadow: 0 10px 35px rgba(201,161,74,.22);
+  z-index: 3;
 }
 
-/* 2nd place on the left */
+/* =========================
+   2ND PLACE (LEFT LOWER)
+   ========================= */
 .lb-podium-card.p2 {
   order: 1;
-  border-color: rgba(192,192,192,.25);
+  margin-bottom: 0;
+  border: 1px solid rgba(192,192,192,.28);
+  z-index: 2;
 }
 
-/* 3rd place on the right */
+/* =========================
+   3RD PLACE (RIGHT LOWER)
+   ========================= */
 .lb-podium-card.p3 {
   order: 3;
-  border-color: rgba(205,127,50,.25);
+  margin-bottom: 0;
+  border: 1px solid rgba(205,127,50,.28);
+  z-index: 1;
 }
 .lb-podium-rank {
   padding: .4rem .5rem;
@@ -752,22 +764,32 @@
   .vote-sheet { border-radius: 28px; }
   .lb-podium-card .lb-podium-name { font-size: .82rem; }
 }
-@media (max-width: 380px) {
-  .cats-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: .9rem;
-    padding: 1rem;
-  }
-
+@media (max-width: 640px) {
   .lb-podium-row {
-    gap: .5rem;
+    gap: .55rem;
+    align-items: flex-end;
   }
 
   .lb-podium-card {
-    width: 32%;
+    width: 31%;
+    min-height: 210px;
   }
 
   .lb-podium-card.p1 {
-    transform: translateY(-12px);
+    margin-bottom: 28px;
   }
+
+  .lb-podium-name {
+    font-size: .72rem;
+    padding-inline: .35rem;
+  }
+}
+
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(201,161,74,.08),
+    transparent 50%
+  );
+  pointer-events: none;
 }

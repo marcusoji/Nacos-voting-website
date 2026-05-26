@@ -111,7 +111,7 @@ function renderBlock(block) {
       <div class="lb-cat-header">
         <div class="lb-cat-orb">${CAT_ICONS[block.category.slug]||''}</div>
         <span class="lb-cat-name">${block.category.name}</span>
-        <a href="${block.category.slug}.html" class="lb-vote-btn">Vote</a>
+        <a href="contestants.html?category=${block.category.slug}" class="lb-vote-btn">Vote</a>
       </div>
       ${podiumHtml}
       ${next5Html}
@@ -123,19 +123,42 @@ function renderBlock(block) {
 function toggleRest(slug, btn) {
   const el = document.getElementById('rest-' + slug);
   if (!el) return;
+
   el.classList.toggle('open');
-  btn.textContent = el.classList.contains('open') ? 'Hide full list' : btn.textContent;
+
+  if (el.classList.contains('open')) {
+    btn.textContent = 'Hide full list';
+  } else {
+    btn.textContent = 'Show full nominees';
+  }
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
+async function loadLeaderboard() {
   const container = document.getElementById('lb-container');
+
   try {
     const r = await apiFetch('/voting/leaderboard');
-    if (!r.ok || !r.data.data) throw new Error();
+
+    if (!r.ok || !r.data.data) {
+      throw new Error();
+    }
+
     container.innerHTML = r.data.data.map(renderBlock).join('');
-  } catch(e) {
-    container.innerHTML = '<p style="text-align:center;color:#e03e3e;padding:2rem;">Failed to load. Please refresh.</p>';
+  } catch (e) {
+    container.innerHTML = `
+      <p style="text-align:center;color:#e03e3e;padding:2rem;">
+        Failed to load leaderboard.
+      </p>
+    `;
   }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadLeaderboard();
+
+  setInterval(() => {
+    loadLeaderboard();
+  }, 30000);
 });
 </script>
 </body>

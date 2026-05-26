@@ -9,7 +9,6 @@
 </head>
 <body>
 
-<!-- ── LUXURY VOTE MODAL ───────────────────────── -->
 <div id="luxury-vote-modal">
   <div class="vote-sheet">
     <div class="vote-photo-strip" id="vm-strip">
@@ -38,7 +37,6 @@
   </div>
 </div>
 
-<!-- ── PAGE ────────────────────────────────────── -->
 <div class="cat-page-wrap">
 
   <div class="cat-page-header">
@@ -50,14 +48,12 @@
     <div class="cat-page-rank-badge" id="cat-rank-badge" style="display:none;"></div>
   </div>
 
-  <!-- Swiper -->
   <div class="swiper-outer" id="swiper-outer">
     <button class="swiper-nav prev" id="btn-prev" onclick="swiperGo(-1)" disabled>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
            stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>
     </button>
     <div class="swiper-track" id="swiper-track">
-      <!-- Slides injected by JS -->
       <div class="swiper-slide" style="color:var(--iv-muted);text-align:center;">
         <div style="width:32px;height:32px;border:2px solid var(--iv-gold);border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 1rem;"></div>
         Loading nominees&#8230;
@@ -69,7 +65,6 @@
     </button>
   </div>
 
-  <!-- Dot indicators -->
   <div class="swiper-dots" id="swiper-dots"></div>
 
 </div>
@@ -125,8 +120,7 @@ function renderSlides() {
       <div class="con-swipe-card">
         <div class="con-swipe-photo">
           ${con.avatar_url
-            ? `<img src="${con.avatar_url}" alt="${con.fullname}"
-                   onerror="this.parentNode.innerHTML='<div style=\'width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--iv-bg2);font-family:Playfair Display,serif;font-size:4rem;font-weight:700;color:var(--iv-gold);\'>${con.fullname.charAt(0)}</div>'">`
+            ? `<img src="${con.avatar_url}" alt="${con.fullname}" id="img-nominee-${i}">`
             : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',serif;font-size:4rem;font-weight:700;color:var(--iv-gold);">${con.fullname.charAt(0)}</div>`
           }
           ${i < 3 ? `<div class="con-swipe-rank">#${i+1}</div>` : ''}
@@ -139,6 +133,19 @@ function renderSlides() {
         </div>
       </div>
     </div>`).join('');
+
+  /* Secure Image Fallback Handling (Guide Fix Item 15) */
+  _contestants.forEach((con, i) => {
+    const imgEl = document.getElementById(`img-nominee-${i}`);
+    if (imgEl) {
+      imgEl.onerror = () => {
+        const fallback = document.createElement('div');
+        fallback.style.cssText = "width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--iv-bg2);font-family:Playfair Display,serif;font-size:4rem;font-weight:700;color:var(--iv-gold);";
+        fallback.textContent = con.fullname.charAt(0);
+        imgEl.replaceWith(fallback);
+      };
+    }
+  });
 
   /* Touch swipe */
   const outer = document.getElementById('swiper-outer');
@@ -219,36 +226,32 @@ function vmUpdate() {
   document.getElementById('vm-qty').textContent   = _vmQty;
   document.getElementById('vm-total').textContent = (_vmQty * (window.PRICE||50)).toLocaleString();
 }
+
+/* ── Checkout Redirect Flow Integration ── */
 async function vmConfirm() {
   if (!_vmCon || !_category) return;
-  const user = Auth.getUser();
-  const btn  = document.getElementById('vm-confirm-btn');
+  
+  const btn = document.getElementById('vm-confirm-btn');
+  setLoading(btn, true);
 
-  const doPayment = async (email) => {
-    setLoading(btn, true);
-    const r = await apiFetch('/voting/initialize', {
-      method: 'POST',
-      body: JSON.stringify({
-        contestantId: _vmCon.id,
-        categoryId  : _category.id,
-        quantity    : _vmQty,
-        email
-      })
-    });
-    if (r.ok && r.data.authorization_url) {
-      location.href = r.data.authorization_url;
-    } else {
-      Toast.error('Payment Error', r.data.message || 'Could not initialize payment.');
-      setLoading(btn, false, 'Confirm &amp; Pay');
-    }
-  };
+  // Add the current item selections to the Ballot Cart State
+  Cart.add({
+    contestantId : _vmCon.id,
+    categoryId   : _category.id,
+    name         : _vmCon.fullname,
+    category     : _category.name,
+    avatarUrl    : _vmCon.avatar_url,
+    quantity     : _vmQty // Properly passes selected quantity from UI state variable
+  });
 
-  if (user) { doPayment(user.email); return; }
-  const email = prompt('Enter your email to receive a payment receipt:');
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    Toast.error('Invalid email', 'Please enter a valid email address.'); return;
-  }
-  doPayment(email);
+  Toast.success(
+    'Added to Ballot',
+    `${_vmCon.fullname} added successfully.`
+  );
+
+  setTimeout(() => {
+    window.location.href = 'checkout.html';
+  }, 700);
 }
 </script>
 </body>
