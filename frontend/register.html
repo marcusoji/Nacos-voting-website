@@ -22,32 +22,75 @@
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Full Name</label>
-            <input type="text" id="r-name" class="form-control" required placeholder="John Doe" autocomplete="name">
+            <input type="text" id="r-name" class="form-control" required
+                   placeholder="John Doe" autocomplete="name">
           </div>
           <div class="form-group">
             <label class="form-label">Department</label>
             <input type="text" id="r-dept" class="form-control" placeholder="Computer Science">
           </div>
         </div>
+
         <div class="form-group">
           <label class="form-label">Email Address</label>
-          <input type="email" id="r-email" class="form-control" required placeholder="johndoe@example.com" autocomplete="email">
+          <input type="email" id="r-email" class="form-control" required
+                 placeholder="johndoe@example.com" autocomplete="email">
         </div>
+
         <div class="form-group">
           <label class="form-label">Matric Number</label>
-          <input type="text" id="r-matric" class="form-control" placeholder="DELSU/2022/10492" autocomplete="username">
+          <!-- Forces lowercase on every keystroke -->
+          <input type="text" id="r-matric" class="form-control"
+                 placeholder="delsu/2022/10492" autocomplete="username"
+                 oninput="this.value=this.value.toLowerCase()">
         </div>
+
         <div class="form-row">
+          <!-- Password with eye toggle -->
           <div class="form-group">
             <label class="form-label">Password</label>
-            <input type="password" id="r-pass" class="form-control" required placeholder="Min 8 characters" autocomplete="new-password">
+            <div style="position:relative;">
+              <input type="password" id="r-pass" class="form-control" required
+                     placeholder="Min 8 characters" autocomplete="new-password"
+                     style="padding-right:2.8rem;">
+              <button type="button" onclick="toggleEye('r-pass','eye-pass')"
+                      style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                             background:none;border:none;cursor:pointer;
+                             color:var(--text-muted,#5e7060);padding:4px;display:flex;align-items:center;"
+                      aria-label="Show password">
+                <svg id="eye-pass" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </button>
+            </div>
           </div>
+
+          <!-- Confirm password with eye toggle -->
           <div class="form-group">
             <label class="form-label">Confirm Password</label>
-            <input type="password" id="r-confirm" class="form-control" required placeholder="Repeat password" autocomplete="new-password">
+            <div style="position:relative;">
+              <input type="password" id="r-confirm" class="form-control" required
+                     placeholder="Repeat password" autocomplete="new-password"
+                     style="padding-right:2.8rem;">
+              <button type="button" onclick="toggleEye('r-confirm','eye-confirm')"
+                      style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                             background:none;border:none;cursor:pointer;
+                             color:var(--text-muted,#5e7060);padding:4px;display:flex;align-items:center;"
+                      aria-label="Show confirm password">
+                <svg id="eye-confirm" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
-        <button type="submit" class="btn btn-primary btn-full btn-lg" id="reg-btn" style="margin-top:.5rem;">
+
+        <button type="submit" class="btn btn-primary btn-full btn-lg"
+                id="reg-btn" style="margin-top:.5rem;">
           Create Account
         </button>
       </form>
@@ -61,25 +104,38 @@
 
 <script src="app.js"></script>
 <script>
+function toggleEye(inputId, svgId) {
+  const inp  = document.getElementById(inputId);
+  const svg  = document.getElementById(svgId);
+  const show = inp.type === 'password';
+  inp.type   = show ? 'text' : 'password';
+  svg.innerHTML = show
+    ? `<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+       <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+       <line x1="1" y1="1" x2="23" y2="23"/>`
+    : `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+       <circle cx="12" cy="12" r="3"/>`;
+}
+
 async function handleRegister(e) {
   e.preventDefault();
-  const btn = document.getElementById('reg-btn');
-  const pass = document.getElementById('r-pass').value;
+  const btn     = document.getElementById('reg-btn');
+  const pass    = document.getElementById('r-pass').value;
   const confirm = document.getElementById('r-confirm').value;
 
   if (pass !== confirm) { Toast.error('Mismatch', 'Passwords do not match.'); return; }
-  if (pass.length < 8)   { Toast.error('Too short', 'Password must be at least 8 characters.'); return; }
+  if (pass.length < 8)  { Toast.error('Too short', 'Password must be at least 8 characters.'); return; }
 
   setLoading(btn, true);
   try {
     const r = await apiFetch('/auth/register', {
       method: 'POST',
       body: JSON.stringify({
-        fullname:      document.getElementById('r-name').value.trim(),
-        email:         document.getElementById('r-email').value.trim(),
-        department:    document.getElementById('r-dept').value.trim(),
-        matric_number: document.getElementById('r-matric').value.trim(),
-        password:      pass
+        fullname     : document.getElementById('r-name').value.trim(),
+        email        : document.getElementById('r-email').value.trim(),
+        department   : document.getElementById('r-dept').value.trim(),
+        matric_number: document.getElementById('r-matric').value.trim().toLowerCase(),
+        password     : pass
       })
     });
     if (r.ok) {
@@ -88,7 +144,7 @@ async function handleRegister(e) {
     } else {
       Toast.error('Registration Failed', r.data.message || 'Please check your details.');
     }
-  } catch(err) {
+  } catch {
     Toast.error('Error', 'Network error. Please try again.');
   } finally {
     setLoading(btn, false, 'Create Account');
