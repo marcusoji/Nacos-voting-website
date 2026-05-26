@@ -161,7 +161,7 @@ function renderBlock(block) {
       <div class="lb-cat-header">
         <div class="lb-cat-orb">${CAT_ICONS[block.category.slug]||''}</div>
         <span class="lb-cat-name">${block.category.name}</span>
-        <a href="contestants.html?category=${block.category.slug}" class="lb-vote-btn">Vote</a>
+        <a href="${block.category.slug}.html" class="lb-vote-btn">Vote</a>
       </div>
       ${podiumHtml}
       ${next5Html}
