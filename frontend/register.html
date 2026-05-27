@@ -125,8 +125,8 @@ async function handleRegister(e) {
       body: JSON.stringify({
         fullname     : document.getElementById('r-name').value.trim(),
         email        : document.getElementById('r-email').value.trim(),
-        department   : document.getElementById('r-dept').value.trim(),
-        matric_number: document.getElementById('r-matric').value.trim().toLowerCase(),
+        department   : null,
+matric_number: null,
         password     : pass
       })
     });
