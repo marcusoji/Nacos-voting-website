@@ -111,45 +111,62 @@ exports.register = async (req, res) => {
 // ── POST /api/auth/login ─────────────────────────────────────
 exports.login = async (req, res) => {
   try {
-    let { email, password, matric_number } = req.body;
-
-    if (!email && matric_number) {
-      const { data: p } = await supabase.from('profiles')
-        .select('email').eq('matric_number', matric_number.trim()).single();
-      if (!p) return res.status(401).json({ message: 'Invalid credentials.' });
-      email = p.email;
-    }
+    let { email, password } = req.body;
 
     if (!email || !password)
-      return res.status(400).json({ message: 'Email/matric and password are required.' });
+      return res.status(400).json({
+        message: 'Email and password are required.'
+      });
 
     email = validator.normalizeEmail(email.trim());
-    const { data, error } = await supabaseAuth.auth.signInWithPassword({ email, password });
-    if (error) return res.status(401).json({ message: 'Invalid credentials.' });
 
-    const { data: profile } = await supabase.from('profiles')
-      .select('role, fullname, department, matric_number').eq('id', data.user.id).single();
+    const { data, error } =
+      await supabaseAuth.auth.signInWithPassword({
+        email,
+        password
+      });
 
-    await logAction(data.user.id, 'USER_LOGIN', email, req);
+    if (error)
+      return res.status(401).json({
+        message: 'Invalid credentials.'
+      });
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role, fullname, department, matric_number')
+      .eq('id', data.user.id)
+      .single();
+
+    await logAction(
+      data.user.id,
+      'USER_LOGIN',
+      email,
+      req
+    );
 
     return res.status(200).json({
-      message     : 'Login successful.',
+      message: 'Login successful.',
       access_token: data.session.access_token,
       user: {
-        id           : data.user.id,
-        email        : data.user.email,
-        fullname     : profile?.fullname || data.user.user_metadata?.fullname,
-        role         : profile?.role || 'user',
-        department   : profile?.department,
-        matric_number: profile?.matric_number
+        id: data.user.id,
+        email: data.user.email,
+        fullname:
+          profile?.fullname ||
+          data.user.user_metadata?.fullname,
+        role: profile?.role || 'user',
+        department: profile?.department || null,
+        matric_number: profile?.matric_number || null
       }
     });
+
   } catch (err) {
     console.error('[LOGIN]', err.message);
-    return res.status(500).json({ message: 'Internal server error.' });
+
+    return res.status(500).json({
+      message: 'Internal server error.'
+    });
   }
 };
-
 // ── POST /api/auth/logout ────────────────────────────────────
 exports.logout = (_req, res) => res.status(200).json({ message: 'Logged out.' });
 
