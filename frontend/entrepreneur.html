@@ -21,9 +21,39 @@
       <div class="vote-qty-label">Number of Votes</div>
       <div class="vote-qty-row">
         <button class="vote-qty-btn" onclick="vmAdj(-1)">&#8722;</button>
-        <div class="vote-qty-num" id="vm-qty">1</div>
+
+        <!-- Typeable input replacing the plain div -->
+        <input
+          type="number"
+          id="vm-qty"
+          value="1"
+          min="1"
+          max="1000"
+          oninput="vmInputChange(this)"
+          style="
+            width: 72px;
+            text-align: center;
+            font-family: 'Playfair Display', Georgia, serif;
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--iv-text, #1A1208);
+            background: var(--iv-bg2, #F5EFE0);
+            border: 1.5px solid var(--iv-border2, rgba(201,161,74,.45));
+            border-radius: 10px;
+            padding: .3rem .4rem;
+            outline: none;
+            -moz-appearance: textfield;
+          ">
+
         <button class="vote-qty-btn" onclick="vmAdj(1)">&#43;</button>
       </div>
+
+      <!-- Remove spinner arrows on number input (webkit) -->
+      <style>
+        #vm-qty::-webkit-inner-spin-button,
+        #vm-qty::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+      </style>
+
       <div class="vote-price-row">
         <span class="vote-price-lbl">Total Amount</span>
         <span class="vote-price-val">&#8358;<span id="vm-total">50</span></span>
@@ -72,7 +102,6 @@
 <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 <script src="app.js"></script>
 <script>
-/* ── State ── */
 let _contestants = [];
 let _category    = null;
 let _cur         = 0;
@@ -80,7 +109,6 @@ let _vmCon       = null;
 let _vmQty       = 1;
 let _startX      = 0;
 
-/* ── Init ── */
 document.addEventListener('DOMContentLoaded', async () => {
   const slug = location.pathname.split('/').pop().replace('.html', '');
   try {
@@ -112,7 +140,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-/* ── Render slides ── */
 function renderSlides() {
   const track = document.getElementById('swiper-track');
   track.innerHTML = _contestants.map((con, i) => `
@@ -134,7 +161,6 @@ function renderSlides() {
       </div>
     </div>`).join('');
 
-  /* Secure Image Fallback Handling (Guide Fix Item 15) */
   _contestants.forEach((con, i) => {
     const imgEl = document.getElementById(`img-nominee-${i}`);
     if (imgEl) {
@@ -147,7 +173,6 @@ function renderSlides() {
     }
   });
 
-  /* Touch swipe */
   const outer = document.getElementById('swiper-outer');
   outer.addEventListener('touchstart', e => { _startX = e.touches[0].clientX; }, { passive:true });
   outer.addEventListener('touchend',   e => {
@@ -156,27 +181,19 @@ function renderSlides() {
   }, { passive:true });
 }
 
-/* ── Dots ── */
 function renderDots() {
-  const dots = document.getElementById('swiper-dots');
-  dots.innerHTML = _contestants.map((_, i) =>
+  document.getElementById('swiper-dots').innerHTML = _contestants.map((_, i) =>
     `<div class="swiper-dot ${i===0?'active':''}" onclick="swiperTo(${i})"></div>`
   ).join('');
 }
 
-/* ── Swiper navigation ── */
-function swiperGo(dir) {
-  swiperTo(_cur + dir);
-}
+function swiperGo(dir) { swiperTo(_cur + dir); }
 function swiperTo(idx) {
   if (idx < 0 || idx >= _contestants.length) return;
   _cur = idx;
   document.getElementById('swiper-track').style.transform = `translateX(-${idx * 100}%)`;
-  document.querySelectorAll('.swiper-dot').forEach((d, i) =>
-    d.classList.toggle('active', i === idx));
+  document.querySelectorAll('.swiper-dot').forEach((d, i) => d.classList.toggle('active', i === idx));
   updateNav();
-
-  /* Badge */
   const badge = document.getElementById('cat-rank-badge');
   badge.style.display = idx < 3 ? 'block' : 'none';
   badge.textContent   = ['1st','2nd','3rd'][idx] || '';
@@ -186,13 +203,10 @@ function updateNav() {
   document.getElementById('btn-next').disabled = _cur === _contestants.length - 1;
 }
 
-/* ── Vote modal ── */
 function vmOpen(idx) {
   _vmCon = _contestants[idx];
   _vmQty = 1;
   vmUpdate();
-  const modal = document.getElementById('luxury-vote-modal');
-  /* Photo */
   const strip = document.getElementById('vm-strip');
   const init  = document.getElementById('vm-initial');
   if (_vmCon.avatar_url) {
@@ -208,50 +222,63 @@ function vmOpen(idx) {
   }
   document.getElementById('vm-name').textContent = _vmCon.fullname;
   document.getElementById('vm-cat').textContent  = _category?.name || '';
-  modal.classList.add('open');
+  document.getElementById('luxury-vote-modal').classList.add('open');
   document.body.style.overflow = 'hidden';
 }
+
 function vmClose() {
   document.getElementById('luxury-vote-modal').classList.remove('open');
   document.body.style.overflow = '';
 }
+
 document.getElementById('luxury-vote-modal').addEventListener('click', function(e) {
   if (e.target === this) vmClose();
 });
+
+/* +/- buttons */
 function vmAdj(d) {
   _vmQty = Math.max(1, Math.min(1000, _vmQty + d));
   vmUpdate();
 }
-function vmUpdate() {
-  document.getElementById('vm-qty').textContent   = _vmQty;
-  document.getElementById('vm-total').textContent = (_vmQty * (window.PRICE||50)).toLocaleString();
+
+/* Direct input — user types a number */
+function vmInputChange(inp) {
+  let v = parseInt(inp.value, 10);
+  if (isNaN(v) || v < 1)    v = 1;
+  if (v > 1000)              v = 1000;
+  _vmQty   = v;
+  inp.value = v;  // correct out-of-range values
+  document.getElementById('vm-total').textContent = (_vmQty * (window.PRICE || 50)).toLocaleString();
 }
 
-/* ── Checkout Redirect Flow Integration ── */
+function vmUpdate() {
+  const inp = document.getElementById('vm-qty');
+  inp.value = _vmQty;
+  document.getElementById('vm-total').textContent = (_vmQty * (window.PRICE || 50)).toLocaleString();
+}
+
 async function vmConfirm() {
   if (!_vmCon || !_category) return;
-  
+
+  // Read directly from input in case user typed without triggering oninput
+  const raw = parseInt(document.getElementById('vm-qty').value, 10);
+  _vmQty = isNaN(raw) || raw < 1 ? 1 : Math.min(raw, 1000);
+
   const btn = document.getElementById('vm-confirm-btn');
   setLoading(btn, true);
 
-  // Add the current item selections to the Ballot Cart State
   Cart.add({
     contestantId : _vmCon.id,
     categoryId   : _category.id,
     name         : _vmCon.fullname,
     category     : _category.name,
     avatarUrl    : _vmCon.avatar_url,
-    quantity     : _vmQty // Properly passes selected quantity from UI state variable
+    quantity     : _vmQty
   });
 
-  Toast.success(
-    'Added to Ballot',
-    `${_vmCon.fullname} added successfully.`
-  );
+  Toast.success('Added to Ballot', `${_vmCon.fullname} added successfully.`);
 
-  setTimeout(() => {
-    window.location.href = 'checkout.html';
-  }, 700);
+  setTimeout(() => { window.location.href = 'checkout.html'; }, 700);
 }
 </script>
 </body>
