@@ -76,7 +76,13 @@ const logAction = async (userId, action, target, req) => {
 // ── POST /api/auth/register ──────────────────────────────────
 exports.register = async (req, res) => {
   try {
-    let { email, password, fullname, department, matric_number } = req.body;
+    let {
+  email,
+  password,
+  fullname,
+  department = null,
+  matric_number = null
+} = req.body;
     if (!email || !password || !fullname)
       return res.status(400).json({ message: 'Full name, email and password are required.' });
 
