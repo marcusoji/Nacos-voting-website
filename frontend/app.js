@@ -172,6 +172,28 @@ window.Cart = {
     item.quantity = Math.max(1, Math.min(1000, item.quantity + delta));
     this.save(items);
   },
+  setQty(id, qty) {
+
+  qty = parseInt(qty);
+
+  if (isNaN(qty) || qty < 1)
+    qty = 1;
+
+  if (qty > 1000)
+    qty = 1000;
+
+  const items = this.get();
+
+  const item = items.find(
+    i => i.contestantId === id
+  );
+
+  if (!item) return;
+
+  item.quantity = qty;
+
+  this.save(items);
+},
   updateBadge() {
     const n = this.get().length;
     document.querySelectorAll('.cart-badge').forEach(b => { b.textContent = n; b.classList.toggle('hidden', n === 0); });
