@@ -75,7 +75,10 @@ async function verify() {
 
   // ── Cancel detection ─────────────────────────────────────
   // Paystack sends ?cancelled=true when user clicks "Cancel & Go Back"
-  const isCancelled = params.get('cancelled') === 'true';
+ const isCancelled =
+  params.get('cancelled') === 'true' ||
+  params.get('status') === 'cancelled' ||
+  params.get('status') === 'failed';
   const storedRef   = sessionStorage.getItem('nacos_pending_ref') || sessionStorage.getItem('nacos_batch_ref');
 
   if (isCancelled) {
@@ -101,7 +104,18 @@ async function verify() {
     params.get('reference') ||
     params.get('trxref')    ||
     sessionStorage.getItem('nacos_batch_ref');
+// If Paystack redirected back without a valid reference,
+// assume payment was abandoned/cancelled.
+if (!params.get('reference') && storedRef) {
+  try {
+    await apiFetch(`/voting/cancel/${storedRef}`, {
+      method: 'POST'
+    });
+  } catch {}
 
+  sessionStorage.removeItem('nacos_pending_ref');
+  sessionStorage.removeItem('nacos_batch_ref');
+}
   if (!ref) {
     setIcon('err');
     setTitle('No Reference Found');

@@ -254,3 +254,41 @@ exports.forceApproveTransaction = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+// Delete transaction
+exports.deleteTransaction = async (req, res) => {
+  try {
+    const ref = String(req.params.ref || '').toUpperCase();
+
+    if (!ref) {
+      return res.status(400).json({
+        success: false,
+        message: 'Transaction reference required.'
+      });
+    }
+
+    const { error } = await supabase
+      .from('transactions')
+      .delete()
+      .eq('reference', ref);
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Transaction deleted successfully.'
+    });
+
+  } catch (err) {
+    console.error('[DELETE TX ERROR]', err.message);
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error.'
+    });
+  }
+};

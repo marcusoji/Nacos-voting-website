@@ -462,11 +462,27 @@ async function loadAllTransactions() {
       <td>${tx.quantity}</td>
       <td>
         <span class="badge badge-${tx.status}">${tx.status}</span>
-        ${(tx.status === 'pending' || tx.status === 'failed') ? `
-          <button class="btn btn-gold btn-sm" style="margin-left:.5rem;padding:.2rem .6rem;font-size:.72rem;cursor:pointer;"
-            onclick="forceApprove('${tx.reference}', '${(tx.contestants?.fullname||'this contestant').replace(/'/g,"\\'")}', ${tx.quantity})"
-            title="Manually credit votes after confirming payment received">✓ Approve</button>` : ''}
-      </td>
+       ${(tx.status === 'pending' || tx.status === 'failed') ? `
+  <div style="display:flex;gap:.4rem;align-items:center;margin-top:.35rem;flex-wrap:wrap;">
+
+    <button
+      class="btn btn-gold btn-sm"
+      style="padding:.2rem .6rem;font-size:.72rem;cursor:pointer;"
+      onclick="forceApprove('${tx.reference}', '${(tx.contestants?.fullname||'this contestant').replace(/'/g,"\\'")}', ${tx.quantity})"
+      title="Manually credit votes after confirming payment received">
+      ✓ Approve
+    </button>
+
+    <button
+      class="btn btn-danger btn-sm"
+      style="padding:.2rem .6rem;font-size:.72rem;cursor:pointer;"
+      onclick="deleteTransaction('${tx.reference}')"
+      title="Delete this transaction permanently">
+      Delete
+    </button>
+
+  </div>
+` : ''}      </td>
       <td style="font-size:.78rem;">${new Date(tx.created_at).toLocaleString()}</td>
     </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">No transactions</td></tr>';
 }
@@ -502,6 +518,24 @@ async function forceApprove(ref, name, qty) {
     Toast.error('Error', 'Network error. Try again.');
     btn.disabled = false;
     btn.textContent = origText;
+  }
+}
+async function deleteTransaction(ref) {
+  if (!confirm(`Delete transaction ${ref}?\n\nThis action cannot be undone.`)) return;
+
+  try {
+    const r = await apiFetch(`/admin/transactions/${ref}`, {
+      method: 'DELETE'
+    });
+
+    if (r.ok) {
+      Toast.success('Deleted', 'Transaction removed successfully.');
+      loadAllTransactions();
+    } else {
+      Toast.error('Failed', r.data.message || 'Could not delete transaction.');
+    }
+  } catch {
+    Toast.error('Error', 'Network error.');
   }
 }
 </script>

@@ -3,6 +3,27 @@ const paystackService = require('../services/paystackService');
 const asyncHandler    = require('../utils/asyncHandler');
 const crypto          = require('crypto');
 
+// Auto-clean old pending transactions
+async function cleanupOldPendingTransactions(userId) {
+  if (!userId) return;
+
+  // Older than 10 minutes
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+  const { error } = await supabase
+    .from('transactions')
+    .update({
+      status: 'cancelled',
+      updated_at: new Date().toISOString()
+    })
+    .eq('user_id', userId)
+    .eq('status', 'pending')
+    .lt('created_at', tenMinutesAgo);
+
+  if (error) {
+    console.error('[PENDING CLEANUP ERROR]', error.message);
+  }
+}
 const makeRef = () => `VT-${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
 
 const resolveEmail = (req) => {
@@ -75,16 +96,25 @@ exports.initializePayment = asyncHandler(async (req, res) => {
   if (!email)
     return res.status(400).json({ message: 'An email address is required.' });
 
-  if (req.user) {
-    const { data: pending } = await supabase
-      .from('transactions')
-      .select('id')
-      .eq('user_id', req.user.id)
-      .eq('status', 'pending')
-      .limit(1);
-    if (pending && pending.length > 0)
-      return res.status(400).json({ message: 'You have a pending transaction. Please wait for it to complete.' });
+ if (req.user) {
+
+  // First cleanup stale pending transactions
+  await cleanupOldPendingTransactions(req.user.id);
+
+  const { data: pending } = await supabase
+    .from('transactions')
+    .select('id, created_at')
+    .eq('user_id', req.user.id)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (pending && pending.length > 0) {
+    return res.status(400).json({
+      message: 'You already have a payment still processing. If you cancelled Paystack, wait a few seconds and try again.'
+    });
   }
+}
 
   const reference    = makeRef();
   const amountInKobo = qty * 50 * 100;   // qty × ₦50 × 100 kobo/naira
