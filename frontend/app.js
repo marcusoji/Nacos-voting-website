@@ -293,7 +293,14 @@ window.CartSidebar = {
         <div class="cart-item-bottom">
           <div class="cart-qty-row">
             <div class="cqb" onclick="Cart.updateQty('${item.contestantId}',-1)">&#8722;</div>
-            <div class="cqv">${item.quantity}</div>
+            <input
+  type="number"
+  class="cqv"
+  min="1"
+  max="1000"
+  value="${item.quantity}"
+  onchange="Cart.setQty('${item.contestantId}', this.value)"
+>
             <div class="cqb" onclick="Cart.updateQty('${item.contestantId}',1)">&#43;</div>
           </div>
           <span class="cart-item-price">&#8358;${(item.quantity * PRICE).toLocaleString()}</span>
