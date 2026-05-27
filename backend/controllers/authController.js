@@ -88,6 +88,16 @@ exports.register = async (req, res) => {
 
     email    = validator.normalizeEmail(email.trim());
     fullname = validator.escape(fullname.trim());
+
+department =
+  department?.trim()
+    ? validator.escape(department.trim())
+    : null;
+
+matric_number =
+  matric_number?.trim()
+    ? matric_number.trim().toLowerCase()
+    : null;
     if (!validator.isEmail(email))
       return res.status(400).json({ message: 'Invalid email.' });
     if (!validator.isLength(password, { min: 8 }))
