@@ -512,3 +512,60 @@ exports.handleWebhook = asyncHandler(async (req, res) => {
     console.error('[WEBHOOK ERROR]', err.message);
   }
 });
+// ── POST /api/voting/cancel/:reference ───────────────────────
+// Called when user cancels on Paystack checkout page.
+// Marks the transaction 'cancelled' so the pending-guard unblocks.
+exports.cancelPayment = asyncHandler(async (req, res) => {
+  const { reference } = req.params;
+  if (!reference || typeof reference !== 'string' || reference.length > 100)
+    return res.status(400).json({ message: 'Invalid reference.' });
+
+  const ref = reference.toUpperCase();
+
+  // Only cancel if still pending — idempotent for already-cancelled
+  const { data: tx } = await supabase
+    .from('transactions').select('status').eq('reference', ref).single();
+
+  if (!tx)
+    return res.status(404).json({ message: 'Transaction not found.' });
+
+  if (tx.status !== 'pending')
+    return res.json({ success: true, message: `Transaction is already ${tx.status}.` });
+
+  await supabase
+    .from('transactions')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('reference', ref)
+    .eq('status', 'pending');
+
+  console.log('[CANCEL] Transaction cancelled by user:', ref);
+  res.json({ success: true, message: 'Transaction cancelled.' });
+});
+
+// ── GET /api/voting/status/:reference ────────────────────────
+// Last-resort DB status check for when Paystack is unreachable.
+// Returns the DB status without calling Paystack at all.
+exports.getTransactionStatus = asyncHandler(async (req, res) => {
+  const { reference } = req.params;
+  if (!reference || typeof reference !== 'string' || reference.length > 100)
+    return res.status(400).json({ message: 'Invalid reference.' });
+
+  const ref = reference.toUpperCase();
+
+  const { data: tx, error } = await supabase
+    .from('transactions')
+    .select('reference, status, quantity, contestant_id, amount')
+    .eq('reference', ref)
+    .single();
+
+  if (error || !tx)
+    return res.status(404).json({ message: 'Transaction not found.' });
+
+  res.json({
+    success   : true,
+    reference : tx.reference,
+    status    : tx.status,
+    quantity  : tx.quantity,
+    contestantId: tx.contestant_id
+  });
+});

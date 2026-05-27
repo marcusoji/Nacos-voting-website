@@ -16,6 +16,10 @@ router.get('/verify/:reference',  optionalSession, vc.verifyPaymentEndpoint);
 router.post('/initialize-batch', optionalSession, paymentLimiter, vc.initializeBatchPayment);
 router.get('/verify-batch/:batchReference', optionalSession, vc.verifyBatchPayment);
 
+// CANCEL + STATUS (no auth — user may not be logged in)
+router.post('/cancel/:reference',  vc.cancelPayment);
+router.get('/status/:reference',   vc.getTransactionStatus);
+
 // WEBHOOK
 router.post('/webhook', vc.handleWebhook);
 

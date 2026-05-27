@@ -193,3 +193,64 @@ exports.getTransactions = async (req, res) => {
     return res.json({ success: true, data });
   } catch(err) { return res.status(500).json({ success: false, message: err.message }); }
 };
+
+// ── POST /api/admin/transactions/:ref/force-approve ──────────
+// Admin manually approves a pending transaction after confirming
+// payment was received (e.g. bank transfer, manual verification).
+exports.forceApproveTransaction = async (req, res) => {
+  try {
+    const ref = String(req.params.ref || '').toUpperCase().trim();
+    if (!ref) return res.status(400).json({ message: 'Reference is required.' });
+
+    const { data: tx, error: txErr } = await supabase
+      .from('transactions').select('*').eq('reference', ref).single();
+
+    if (txErr || !tx)
+      return res.status(404).json({ message: 'Transaction not found.' });
+
+    if (tx.status === 'success')
+      return res.json({ success: true, message: 'Already recorded — votes are credited.' });
+
+    if (tx.status === 'cancelled')
+      return res.status(400).json({ message: 'This transaction was cancelled. Create a new one instead.' });
+
+    // Process votes atomically via the same RPC used by normal verify
+    const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
+      p_tx_ref: ref,
+      p_cat_id: tx.category_id,
+      p_con_id: tx.contestant_id,
+      p_usr_id: tx.user_id || null,
+      p_qty   : tx.quantity
+    });
+
+    if (rpcErr) {
+      console.error('[FORCE APPROVE RPC]', rpcErr.message, '| ref:', ref);
+      return res.status(500).json({ message: `RPC error: ${rpcErr.message}` });
+    }
+
+    // Log who approved it
+    console.log(`[FORCE APPROVE] ref:${ref} approved by admin:${req.user?.id} | qty:${tx.quantity}`);
+
+    // Add audit log entry
+    await supabase.from('audit_logs').insert({
+      user_id   : req.user?.id,
+      action    : 'FORCE_APPROVE_TRANSACTION',
+      target    : ref,
+      ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
+    }).catch(() => {});
+
+    if (!processed) {
+      return res.json({ success: true, message: 'Votes were already recorded (webhook beat you to it).' });
+    }
+
+    res.json({
+      success : true,
+      message : `✓ ${tx.quantity} vote(s) credited for reference ${ref}.`,
+      quantity: tx.quantity,
+      reference: ref
+    });
+  } catch (err) {
+    console.error('[FORCE APPROVE]', err.message);
+    res.status(500).json({ message: err.message });
+  }
+};

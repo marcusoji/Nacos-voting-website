@@ -460,7 +460,13 @@ async function loadAllTransactions() {
       <td style="font-size:.8rem;">${tx.categories?.name||'—'}</td>
       <td>₦${(tx.amount||0).toLocaleString()}</td>
       <td>${tx.quantity}</td>
-      <td><span class="badge badge-${tx.status}">${tx.status}</span></td>
+      <td>
+        <span class="badge badge-${tx.status}">${tx.status}</span>
+        ${(tx.status === 'pending' || tx.status === 'failed') ? `
+          <button class="btn btn-gold btn-sm" style="margin-left:.5rem;padding:.2rem .6rem;font-size:.72rem;cursor:pointer;"
+            onclick="forceApprove('${tx.reference}', '${(tx.contestants?.fullname||'this contestant').replace(/'/g,"\\'")}', ${tx.quantity})"
+            title="Manually credit votes after confirming payment received">✓ Approve</button>` : ''}
+      </td>
       <td style="font-size:.78rem;">${new Date(tx.created_at).toLocaleString()}</td>
     </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">No transactions</td></tr>';
 }
@@ -473,6 +479,31 @@ document.addEventListener('DOMContentLoaded', () => {
     // Available from config
   }
 });
+
+async function forceApprove(ref, name, qty) {
+  if (!confirm(`Force-approve ${qty} vote(s) for "${name}"?\n\nOnly do this AFTER you have confirmed the payment was actually received.\n\nReference: ${ref}`)) return;
+
+  const btn = event.target;
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Processing…';
+
+  try {
+    const r = await apiFetch(`/admin/transactions/${ref}/force-approve`, { method: 'POST' });
+    if (r.ok && r.data.success) {
+      Toast.success('Approved!', r.data.message);
+      setTimeout(loadAllTransactions, 1000); // Refresh the table
+    } else {
+      Toast.error('Failed', r.data.message || 'Could not approve transaction.');
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
+  } catch {
+    Toast.error('Error', 'Network error. Try again.');
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
 </script>
 </body>
 </html>

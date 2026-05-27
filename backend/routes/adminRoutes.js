@@ -29,5 +29,6 @@ router.delete('/contestants/:id', ...isAdmin, admin.deleteContestant);
 
 // Transactions
 router.get('/transactions', ...isAdmin, admin.getTransactions);
+router.post('/transactions/:ref/force-approve', ...isAdmin, admin.forceApproveTransaction);
 
 module.exports = router;

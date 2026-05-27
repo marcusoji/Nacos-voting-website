@@ -72,10 +72,35 @@ function isBatchRef(ref) { return ref && ref.toUpperCase().startsWith('BT-'); }
 
 async function verify() {
   const params = new URLSearchParams(location.search);
- const ref =
-  params.get('reference') ||
-  params.get('trxref') ||
-  sessionStorage.getItem('nacos_batch_ref');
+
+  // ── Cancel detection ─────────────────────────────────────
+  // Paystack sends ?cancelled=true when user clicks "Cancel & Go Back"
+  const isCancelled = params.get('cancelled') === 'true';
+  const storedRef   = sessionStorage.getItem('nacos_pending_ref') || sessionStorage.getItem('nacos_batch_ref');
+
+  if (isCancelled) {
+    const cancelRef = params.get('reference') || params.get('trxref') || storedRef;
+    sessionStorage.removeItem('nacos_pending_ref');
+    sessionStorage.removeItem('nacos_batch_ref');
+    // Tell backend to mark it cancelled so pending-guard unblocks
+    if (cancelRef) {
+      try { await apiFetch(`/voting/cancel/${cancelRef}`, { method: 'POST' }); } catch {}
+    }
+    setIcon('err');
+    setTitle('Payment Cancelled');
+    setMsg('You cancelled the payment. No charge was made. Your ballot is still saved — you can try again.');
+    setExtra(`
+      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+        <a href="checkout.html"   class="btn btn-gold">Try Again</a>
+        <a href="categories.html" class="btn btn-outline">Back to Voting</a>
+      </div>`);
+    return;
+  }
+
+  const ref =
+    params.get('reference') ||
+    params.get('trxref')    ||
+    sessionStorage.getItem('nacos_batch_ref');
 
   if (!ref) {
     setIcon('err');
@@ -123,13 +148,13 @@ async function verifySingle(ref) {
   const netErr = r.data?.networkError || r.status === 503 || r.status === 0;
   if (netErr && attempts < MAX) {
     setMsg(`Payment gateway is slow to respond — retrying (${attempts}/${MAX})&#8230;`);
-    setTimeout(() => verifySingle(ref), DELAY);
+    setTimeout(() => verifySingle(ref), nextDelay());
     return;
   }
 
   if (r.status === 404 && attempts < MAX) {
     setMsg(`Payment processing — confirming (${attempts}/${MAX})&#8230;`);
-    setTimeout(() => verifySingle(ref), DELAY);
+    setTimeout(() => verifySingle(ref), nextDelay());
     return;
   }
 
@@ -145,12 +170,13 @@ async function verifySingle(ref) {
       </div>`);
   } else {
     setTitle('Verification Pending');
-    setMsg('We could not automatically confirm your payment right now. If money was deducted, your votes are most likely recorded. Check the leaderboard or try the button below.');
+    setMsg('We could not automatically confirm your payment right now. If money was deducted, your votes are most likely recorded. Check the leaderboard or try below.');
     setExtra(`
       ${refBadge(ref)}
       <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
         <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
-        <button onclick="resetAndRetry('${ref}')" class="btn btn-outline">Retry Now</button>
+        <button onclick="checkDbStatus('${ref}')" class="btn btn-gold">Check My Votes</button>
+        <button onclick="resetAndRetry('${ref}')" class="btn btn-outline">Retry</button>
       </div>
       <p style="font-size:.75rem;color:var(--text-muted);margin-top:.75rem;">
         Still stuck? Email support quoting the reference above.
@@ -217,13 +243,13 @@ return;
   const netErr = r.data?.networkError || r.status === 503 || r.status === 0;
   if (netErr && attempts < MAX) {
     setMsg(`Payment gateway is slow to respond — retrying (${attempts}/${MAX})&#8230;`);
-    setTimeout(() => verifyBatch(ref), DELAY);
+    setTimeout(() => verifyBatch(ref), nextDelay());
     return;
   }
 
   if (r.status === 404 && attempts < MAX) {
     setMsg(`Payment processing — confirming (${attempts}/${MAX})&#8230;`);
-    setTimeout(() => verifyBatch(ref), DELAY);
+    setTimeout(() => verifyBatch(ref), nextDelay());
     return;
   }
 
@@ -249,6 +275,41 @@ return;
       <p style="font-size:.75rem;color:var(--text-muted);margin-top:.75rem;">
         Still stuck? Email support quoting the reference above.
       </p>`);
+  }
+}
+
+/* Check DB directly — bypasses Paystack, used when network is down */
+async function checkDbStatus(ref) {
+  setIcon('wait');
+  setTitle('Checking…');
+  setMsg('Checking vote record in database…');
+  setExtra('');
+  try {
+    const r = await apiFetch(`/voting/status/${ref}`);
+    if (r.ok && r.data.status === 'success') {
+      setIcon('ok');
+      setTitle('Votes Are Recorded!');
+      setMsg(`Your ${r.data.quantity || ''} vote(s) were successfully credited. The payment gateway was slow to confirm, but your votes are in.`);
+      setExtra(refBadge(ref) + actionBtns(ref));
+      Cart.clear();
+    } else if (r.ok && r.data.status === 'pending') {
+      setTitle('Still Processing');
+      setMsg('Your transaction is still pending. This usually means Paystack has not confirmed yet. Please wait a minute and check the leaderboard.');
+      setExtra(`
+        ${refBadge(ref)}
+        <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+          <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
+          <button onclick="resetAndRetry('${ref}')" class="btn btn-outline">Retry Paystack</button>
+        </div>`);
+    } else {
+      setTitle('Not Found');
+      setMsg(r.data?.message || 'Could not find this transaction. Contact support with your reference.');
+      setExtra(refBadge(ref));
+    }
+  } catch {
+    setTitle('Network Error');
+    setMsg('Could not reach server. Please check your connection.');
+    setExtra(`<button onclick="checkDbStatus('${ref}')" class="btn btn-outline" style="margin-top:1rem;">Try Again</button>`);
   }
 }
 
