@@ -163,7 +163,7 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
     });
   }
 
-  // Idempotent — already done
+  // ── Already fully recorded ────────────────────────────────
   if (tx.status === 'success') {
     console.log('[VERIFY] Already processed:', ref);
     return res.json({
@@ -175,23 +175,19 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
     });
   }
 
-  if (tx.status === 'failed') {
-    return res.status(400).json({
-      success: false,
-      message: 'This transaction previously failed. If you were charged, contact support with your reference.'
-    });
-  }
-
-  // ── Call Paystack ────────────────────────────────────────
+  // ── Always ask Paystack for the true state ────────────────
+  // We do this for EVERY non-success status (pending, failed, cancelled)
+  // because Nigerian networks cause transactions to be marked failed/cancelled
+  // locally while Paystack actually collected the money. Re-checking Paystack
+  // is free and lets us recover votes in all those cases.
   const expectedKobo = Number(tx.amount) * 100;
-
-  console.log('[VERIFY] Calling Paystack | ref:', ref, '| db_naira:', tx.amount, '| expected_kobo:', expectedKobo);
+  console.log('[VERIFY] Calling Paystack | ref:', ref, '| db_naira:', tx.amount, '| status:', tx.status);
 
   const result = await paystackService.verifyTx(ref, expectedKobo);
 
   // ── Network/timeout error — do NOT mark as failed ────────
   if (result.networkError) {
-    console.warn('[VERIFY] Network error from Paystack — leaving pending:', ref);
+    console.warn('[VERIFY] Network error from Paystack — leaving as:', tx.status, ref);
     return res.status(503).json({
       success      : false,
       networkError : true,
@@ -199,39 +195,54 @@ exports.verifyPaymentEndpoint = asyncHandler(async (req, res) => {
     });
   }
 
-  // Calculate local flags explicitly so logs show clear context
-  const paystackTx = result.rawData;
-  const statusOk   = paystackTx?.status === 'success';
-  const refOk      = paystackTx?.reference === ref;
-  const currencyOk = paystackTx?.currency === 'NGN';
-  
-  // Local evaluation tracking for logging visibility
-  const amountOk   = result.success; 
+  const paystackTx     = result.rawData;
+  const paystackStatus = paystackTx?.status; // 'success', 'failed', 'abandoned', 'reversed', etc.
 
   // ── Paystack says payment did not succeed ────────────────
   if (!result.success) {
-    console.warn('[VERIFY] Payment not successful details:', ref, {
-      paystackStatus  : paystackTx?.status,
-      paystackAmount  : paystackTx?.amount,
-      paystackRef     : paystackTx?.reference,
-      paystackCurrency: paystackTx?.currency,
-      validationFlags : { statusOk, refOk, currencyOk, amountOk }
-    });
+    console.warn('[VERIFY] Paystack non-success:', ref, { paystackStatus, dbStatus: tx.status });
 
-    await supabase
-      .from('transactions')
-      .update({ status: 'failed', updated_at: new Date().toISOString() })
-      .eq('reference', ref)
-      .eq('status', 'pending'); // guard: only update if still pending
+    // Only overwrite status if it makes sense to do so
+    // 'abandoned' = user closed Paystack popup — treat same as cancelled, not failed
+    const newStatus = paystackStatus === 'abandoned' ? 'cancelled' : 'failed';
+
+    // Don't downgrade a cancelled TX to failed — user may retry
+    if (tx.status === 'pending') {
+      await supabase
+        .from('transactions')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('reference', ref)
+        .eq('status', 'pending');
+    }
+
+    // Give the right message based on what Paystack actually said
+    const isAbandoned  = paystackStatus === 'abandoned';
+    const isCancelled  = tx.status === 'cancelled' || isAbandoned;
 
     return res.status(400).json({
-      success: false,
-      message: 'Payment was not successful according to Paystack. No charge was made.'
+      success   : false,
+      abandoned : isAbandoned,
+      cancelled : isCancelled,
+      paystackStatus,
+      message   : isCancelled
+        ? 'Payment was not completed. Your cart is still saved — you can try again.'
+        : 'Payment was not successful. No charge was made. Your cart is still saved.'
     });
   }
 
   // ── Paystack confirmed success — record votes atomically ─
   console.log('[VERIFY] Paystack confirmed success | ref:', ref);
+
+  // Re-open cancelled/failed TXs so the RPC (which checks status='pending') can process them.
+  // This covers the case where Nigerian network caused an auto-cancel but Paystack got the money.
+  if (tx.status !== 'pending') {
+    await supabase
+      .from('transactions')
+      .update({ status: 'pending', updated_at: new Date().toISOString() })
+      .eq('reference', ref)
+      .in('status', ['cancelled', 'failed']);
+    console.log('[VERIFY] Re-opened', tx.status, 'TX for processing:', ref);
+  }
 
   const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
     p_tx_ref: ref,
@@ -435,11 +446,14 @@ exports.verifyBatchPayment = asyncHandler(async (req, res) => {
   }
 
   // Verify against Paystack once (use the batch reference as Paystack reference)
+  // Always call Paystack regardless of DB status (pending/cancelled/failed) because
+  // Nigerian network drops can cause local cancellation while Paystack has the money.
   const expectedKobo = txRows.reduce(
-  (s, tx) => s + Math.round(Number(tx.amount) * 100),
-  0
-);
-  console.log('[BATCH VERIFY] Calling Paystack | batchRef:', batchRef, '| expected_kobo:', expectedKobo);
+    (s, tx) => s + Math.round(Number(tx.amount) * 100),
+    0
+  );
+  const dbStatuses = [...new Set(txRows.map(t => t.status))].join(',');
+  console.log('[BATCH VERIFY] Calling Paystack | batchRef:', batchRef, '| expected_kobo:', expectedKobo, '| db statuses:', dbStatuses);
 
   const result = await paystackService.verifyTx(batchRef, expectedKobo);
 
@@ -452,24 +466,52 @@ exports.verifyBatchPayment = asyncHandler(async (req, res) => {
   }
 
   if (!result.success) {
-    // Mark all pending rows as failed
+    const paystackStatus = result.rawData?.status;
+    const isAbandoned = paystackStatus === 'abandoned';
+    const newStatus   = isAbandoned ? 'cancelled' : 'failed';
+
+    // Only overwrite rows that are still pending — don't stomp already-cancelled rows
     await supabase
       .from('transactions')
-      .update({ status: 'failed', updated_at: new Date().toISOString() })
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
       .eq('batch_reference', batchRef)
       .eq('status', 'pending');
 
     return res.status(400).json({
-      success: false,
-      message: 'Payment was not successful according to Paystack. No charge was made.'
+      success       : false,
+      abandoned     : isAbandoned,
+      paystackStatus,
+      message       : isAbandoned
+        ? 'Payment was not completed. Your cart is still saved — you can try again.'
+        : 'Payment was not successful according to Paystack. No charge was made. Your cart is still saved.'
     });
   }
 
+  // Re-open any cancelled/failed rows so the RPC can process them.
+  // Paystack confirmed the money arrived — we must credit those votes.
+  const nonPending = txRows.filter(tx => tx.status !== 'success' && tx.status !== 'pending');
+  if (nonPending.length > 0) {
+    await supabase
+      .from('transactions')
+      .update({ status: 'pending', updated_at: new Date().toISOString() })
+      .eq('batch_reference', batchRef)
+      .in('status', ['cancelled', 'failed']);
+    console.log('[BATCH VERIFY] Re-opened', nonPending.length, 'non-pending rows for:', batchRef);
+  }
+
+  // Re-fetch rows after re-open so we have fresh statuses
+  const { data: freshRows } = await supabase
+    .from('transactions').select('*').eq('batch_reference', batchRef);
+  const rowsToProcess = freshRows || txRows;
+
   // Paystack confirmed — process votes for each contestant individually
   const results = [];
-  for (const tx of txRows) {
+  for (const tx of rowsToProcess) {
+    const name = tx.metadata?.contestantName || tx.contestant_id;
+
+    // Already done — idempotent skip
     if (tx.status === 'success') {
-      results.push({ contestantId: tx.contestant_id, contestantName: tx.metadata?.contestantName, quantity: tx.quantity, status: 'already_recorded' });
+      results.push({ contestantId: tx.contestant_id, contestantName: name, quantity: tx.quantity, status: 'already_recorded' });
       continue;
     }
 
@@ -483,9 +525,9 @@ exports.verifyBatchPayment = asyncHandler(async (req, res) => {
 
     if (rpcErr) {
       console.error('[BATCH VERIFY RPC]', rpcErr.message, '| ref:', tx.reference);
-      results.push({ contestantId: tx.contestant_id, contestantName: tx.metadata?.contestantName, quantity: tx.quantity, status: 'rpc_error' });
+      results.push({ contestantId: tx.contestant_id, contestantName: name, quantity: tx.quantity, status: 'rpc_error' });
     } else {
-      results.push({ contestantId: tx.contestant_id, contestantName: tx.metadata?.contestantName, quantity: tx.quantity, status: processed ? 'success' : 'already_recorded' });
+      results.push({ contestantId: tx.contestant_id, contestantName: name, quantity: tx.quantity, status: processed ? 'success' : 'already_recorded' });
     }
   }
 
@@ -528,13 +570,25 @@ exports.handleWebhook = asyncHandler(async (req, res) => {
       .from('processed_webhooks').select('id').eq('event_id', eventId).single();
     if (already) { console.log('[WEBHOOK] Replay prevented:', eventId); return; }
 
+    const ref = reference.toUpperCase();
     const { data: tx } = await supabase
-      .from('transactions').select('*').eq('reference', reference.toUpperCase()).single();
-    if (!tx) { console.warn('[WEBHOOK] TX not found:', reference); return; }
-    if (tx.status !== 'pending') { console.log('[WEBHOOK] Not pending, skip:', reference); return; }
+      .from('transactions').select('*').eq('reference', ref).single();
+    if (!tx) { console.warn('[WEBHOOK] TX not found:', ref); return; }
+
+    // Paystack says charge.success — this is authoritative.
+    // If our DB says cancelled/failed (common with Nigerian network drops),
+    // re-open to pending so the RPC can credit the votes.
+    if (tx.status === 'success') { console.log('[WEBHOOK] Already processed:', ref); return; }
+    if (tx.status === 'cancelled' || tx.status === 'failed') {
+      console.log('[WEBHOOK] Re-opening', tx.status, 'TX — Paystack confirms payment:', ref);
+      await supabase
+        .from('transactions')
+        .update({ status: 'pending', updated_at: new Date().toISOString() })
+        .eq('reference', ref);
+    }
 
     const { error: rpcErr } = await supabase.rpc('process_vote_transaction', {
-      p_tx_ref : reference.toUpperCase(),
+      p_tx_ref : ref,
       p_cat_id : tx.category_id,
       p_con_id : tx.contestant_id,
       p_usr_id : tx.user_id || null,
