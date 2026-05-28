@@ -81,23 +81,17 @@ function renderCheckout() {
         <div class="checkout-item-name">${item.name}</div>
         <div class="checkout-item-cat" style="display:inline-flex;padding:.2rem .6rem;border-radius:999px;background:rgba(201,161,74,.08);border:1px solid rgba(201,161,74,.2);width:fit-content;">${item.category}</div>
       </div>
-      <div class="checkout-qty-row">
-        <div class="cqb" onclick="Cart.updateQty('${item.contestantId}',-1);renderCheckout()">&#8722;</div>
-        <div class="cqv">${item.quantity}</div>
-        <div class="cqb" onclick="Cart.updateQty('${item.contestantId}',1);renderCheckout()">&#43;</div>
+      <div class="checkout-item-actions">
+        <div class="checkout-qty-row">
+          <div class="cqb" onclick="Cart.updateQty('${item.contestantId}',-1);renderCheckout()">&#8722;</div>
+          <div class="cqv">${item.quantity}</div>
+          <div class="cqb" onclick="Cart.updateQty('${item.contestantId}',1);renderCheckout()">&#43;</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:.75rem;">
+          <div class="checkout-item-price">&#8358;${(item.quantity * PRICE).toLocaleString()}</div>
+          <button class="checkout-item-remove" onclick="removeItem('${item.contestantId}')">Remove</button>
+        </div>
       </div>
-<div style="display:flex;flex-direction:column;align-items:flex-end;gap:.5rem;">
-  <div class="checkout-item-price">
-    &#8358;${(item.quantity * PRICE).toLocaleString()}
-  </div>
-
-  <button
-    style="background:none;border:none;color:#ff6b6b;font-size:.75rem;cursor:pointer;font-weight:700;"
-    onclick="removeItem('${item.contestantId}')"
-  >
-    Remove
-  </button>
-</div>
     </div>`).join('');
 
 
