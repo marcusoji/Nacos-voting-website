@@ -14,8 +14,7 @@
       <div id="s-icon" class="success-icon wait" style="margin:0 auto 1.25rem;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/>
-          <polyline points="12 6 12 12 16 14"/>
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
         </svg>
       </div>
 
@@ -29,65 +28,75 @@
 
 <script src="app.js"></script>
 <script>
-/* ---------- icon helpers ---------- */
+/* ── icon helpers ─────────────────────────────────────────── */
 const ICONS = {
   ok  : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
               stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
   err : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
               stroke-linecap="round" stroke-linejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+  warn: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
   wait: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`
 };
+function setIcon(type)  { const el = document.getElementById('s-icon'); el.className = `success-icon ${type}`; el.innerHTML = ICONS[type] || ICONS.wait; }
+function setTitle(t)    { document.getElementById('s-title').textContent = t; }
+function setMsg(m)      { document.getElementById('s-msg').innerHTML = m; }
+function setExtra(h)    { document.getElementById('s-extra').innerHTML = h; }
 
-function setIcon(type) {
-  const el = document.getElementById('s-icon');
-  el.className  = `success-icon ${type}`;
-  el.innerHTML  = ICONS[type] || ICONS.wait;
+function refBadge(ref)  { return `<div class="success-ref" style="margin-top:.9rem;">Ref: ${ref}</div>`; }
+function actionBtns()   {
+  return `<div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1.25rem;">
+    <a href="leaderboard.html" class="btn btn-primary">View Standings</a>
+    <a href="categories.html"  class="btn btn-outline">Vote Again</a>
+  </div>`;
 }
-function setTitle(t) { document.getElementById('s-title').textContent = t; }
-function setMsg(m)   { document.getElementById('s-msg').innerHTML    = m; }
-function setExtra(h) { document.getElementById('s-extra').innerHTML  = h; }
-
-function actionBtns(ref) {
-  return `
-    <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1.25rem;">
-      <a href="leaderboard.html" class="btn btn-primary">View Standings</a>
-      <a href="categories.html"  class="btn btn-outline">Vote Again</a>
-    </div>`;
+function retryBtns(ref) {
+  return `<div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+    <button onclick="resetAndRetry()" class="btn btn-gold">Check Again</button>
+    <a href="leaderboard.html" class="btn btn-outline">View Standings</a>
+  </div>
+  <p style="font-size:.75rem;color:var(--text-muted);margin-top:.75rem;text-align:center;">
+    If your votes appear on the leaderboard, they were recorded. Quote <strong>${ref}</strong> to support if needed.
+  </p>`;
+}
+function tryAgainBtns() {
+  return `<div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+    <a href="checkout.html"   class="btn btn-gold">Try Again</a>
+    <a href="categories.html" class="btn btn-outline">Back to Voting</a>
+  </div>`;
 }
 
-function refBadge(ref) {
-  return `<div class="success-ref" style="margin-top:.9rem;">Ref: ${ref}</div>`;
-}
-
-/* ---------- main verify logic ---------- */
+/* ── retry config ─────────────────────────────────────────── */
+// Nigerian networks: be patient. Retry up to 8 times, starting fast then slowing.
+const RETRY_DELAYS = [3000, 4000, 5000, 6000, 8000, 10000, 12000, 15000];
 let attempts = 0;
-const MAX    = 5;
-const DELAY  = 4000;
 
-// Detect batch vs single reference
 function isBatchRef(ref) { return ref && ref.toUpperCase().startsWith('BT-'); }
 
+/* ── entry point ─────────────────────────────────────────── */
 async function verify() {
   const params = new URLSearchParams(location.search);
- const ref =
-  params.get('reference') ||
-  params.get('trxref') ||
-  sessionStorage.getItem('nacos_batch_ref');
+  const ref =
+    params.get('reference') ||
+    params.get('trxref')    ||
+    sessionStorage.getItem('nacos_batch_ref') ||
+    sessionStorage.getItem('nacos_pending_ref');
 
   if (!ref) {
     setIcon('err');
     setTitle('No Reference Found');
-    setMsg('Paystack did not return a transaction reference. If you paid, check your email for a receipt, or contact support.');
-    setExtra(`
-      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
-        <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
-        <a href="categories.html"  class="btn btn-outline">Back to Voting</a>
-      </div>`);
+    setMsg('Paystack did not return a transaction reference. If you paid, check your email for a receipt, then contact support.');
+    setExtra(tryAgainBtns());
     return;
   }
+
+  // Store so resetAndRetry can re-use it
+  window._verifyRef = ref;
 
   if (isBatchRef(ref)) {
     await verifyBatch(ref);
@@ -96,178 +105,204 @@ async function verify() {
   }
 }
 
-/* ---------- single payment verify (unchanged logic) ---------- */
+/* ── single verify ───────────────────────────────────────── */
 async function verifySingle(ref) {
   attempts++;
+  const maxAttempts = RETRY_DELAYS.length + 1;
   setMsg(attempts > 1
-    ? `Retrying verification (attempt ${attempts}/${MAX})&#8230;`
+    ? `Still checking — attempt ${attempts} of ${maxAttempts}. Nigerian networks can be slow, please hold on&#8230;`
     : 'Confirming with Paystack&#8230;');
 
   let r;
   try {
     r = await apiFetch(`/voting/verify/${ref}`);
   } catch (e) {
-    r = { ok: false, status: 0, data: { message: 'Network error', networkError: true } };
+    r = { ok: false, status: 0, data: { networkError: true } };
   }
 
+  /* SUCCESS ✓ */
   if (r.ok && r.data.success) {
-    setIcon('ok');
-    setTitle('Votes Recorded!');
-    setMsg(`Your <strong>${r.data.quantity || ''} vote(s)</strong> have been recorded. Thank you for participating!`);
-    setExtra(refBadge(ref) + actionBtns(ref));
     sessionStorage.removeItem('nacos_pending_ref');
     sessionStorage.removeItem('nacos_batch_ref');
     if (r.data.contestantId) Cart.removeById(r.data.contestantId);
     else Cart.clear();
+    setIcon('ok');
+    setTitle('Votes Recorded!');
+    setMsg(`Your <strong>${r.data.quantity || ''} vote(s)</strong> have been recorded. Thank you!`);
+    setExtra(refBadge(ref) + actionBtns());
     return;
   }
 
-  const netErr = r.data?.networkError || r.status === 503 || r.status === 0;
-  if (netErr && attempts < MAX) {
-    setMsg(`Payment gateway is slow to respond — retrying (${attempts}/${MAX})&#8230;`);
-    setTimeout(() => verifySingle(ref), DELAY);
+  /* NETWORK / GATEWAY TIMEOUT — retry */
+  const isNetErr = r.data?.networkError || r.status === 503 || r.status === 0;
+  if (isNetErr) {
+    if (attempts <= RETRY_DELAYS.length) {
+      const wait = RETRY_DELAYS[attempts - 1];
+      setIcon('wait');
+      setMsg(`Payment gateway is slow to respond (Nigerian network). Retrying in ${Math.round(wait/1000)}s — attempt ${attempts}/${RETRY_DELAYS.length + 1}&#8230;`);
+      setTimeout(() => verifySingle(ref), wait);
+      return;
+    }
+    // Exhausted retries but can't confirm either way
+    setIcon('warn');
+    setTitle('Could Not Confirm Yet');
+    setMsg('We cannot reach Paystack right now. <strong>If money left your account, your votes are most likely recorded.</strong> Check the leaderboard below.');
+    setExtra(refBadge(ref) + retryBtns(ref));
     return;
   }
 
-  if (r.status === 404 && attempts < MAX) {
-    setMsg(`Payment processing — confirming (${attempts}/${MAX})&#8230;`);
-    setTimeout(() => verifySingle(ref), DELAY);
+  /* TX NOT IN DB YET (404) — Paystack webhook may still be on its way */
+  if (r.status === 404 && attempts <= RETRY_DELAYS.length) {
+    const wait = RETRY_DELAYS[attempts - 1];
+    setMsg(`Transaction record not found yet — waiting for Paystack (${attempts}/${RETRY_DELAYS.length + 1})&#8230;`);
+    setTimeout(() => verifySingle(ref), wait);
     return;
   }
 
-  setIcon('err');
-  // Clear the stored pending ref — payment is resolved (failed or cancelled)
-  sessionStorage.removeItem('nacos_pending_ref');
-
-  if (r.status === 400) {
-    // Payment cancelled or genuinely failed — mark it cancelled in DB
-    // so the pending guard unblocks immediately for the next attempt
-    try { await apiFetch(`/voting/cancel/${ref}`, { method: 'POST' }); } catch {}
-
+  /* ABANDONED / CANCELLED — user closed the Paystack popup or back-button */
+  if (r.status === 400 && (r.data?.abandoned || r.data?.cancelled)) {
+    sessionStorage.removeItem('nacos_pending_ref');
+    setIcon('warn');
     setTitle('Payment Not Completed');
-    setMsg(r.data.message || 'The payment did not go through. No charge was made. Your cart is still saved.');
-    setExtra(`
-      ${refBadge(ref)}
-      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
-        <a href="checkout.html"  class="btn btn-gold">Try Again</a>
-        <a href="categories.html" class="btn btn-outline">Back to Voting</a>
-      </div>`);
-  } else {
-    setTitle('Verification Pending');
-    setMsg('We could not automatically confirm your payment right now. If money was deducted, your votes are most likely recorded. Check the leaderboard or retry.');
-    setExtra(`
-      ${refBadge(ref)}
-      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
-        <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
-        <button onclick="resetAndRetry('${ref}')" class="btn btn-outline">Retry Now</button>
-      </div>
-      <p style="font-size:.75rem;color:var(--text-muted);margin-top:.75rem;">
-        Still stuck? Email support quoting the reference above.
-      </p>`);
+    setMsg('You closed the payment page before completing. <strong>No money was taken.</strong> Your cart is still saved.');
+    setExtra(refBadge(ref) + tryAgainBtns());
+    return;
   }
+
+  /* PAYMENT FAILED (Paystack confirmed decline) */
+  if (r.status === 400) {
+    sessionStorage.removeItem('nacos_pending_ref');
+    setIcon('err');
+    setTitle('Payment Declined');
+    setMsg(r.data.message || 'The payment did not go through. No charge was made. Your cart is still saved — try again or use a different card.');
+    setExtra(refBadge(ref) + tryAgainBtns());
+    return;
+  }
+
+  /* ANYTHING ELSE (500, unexpected) — do not accuse them of not paying */
+  setIcon('warn');
+  setTitle('Verification Delayed');
+  setMsg('Something went wrong on our end. <strong>If money left your account, your votes are most likely recorded.</strong> Check the leaderboard or try again shortly.');
+  setExtra(refBadge(ref) + retryBtns(ref));
 }
 
-/* ---------- batch payment verify ---------- */
+/* ── batch verify ────────────────────────────────────────── */
 async function verifyBatch(ref) {
   attempts++;
+  const maxAttempts = RETRY_DELAYS.length + 1;
   setMsg(attempts > 1
-    ? `Retrying batch verification (attempt ${attempts}/${MAX})&#8230;`
-    : 'Confirming your votes with Paystack&#8230;');
+    ? `Still checking — attempt ${attempts} of ${maxAttempts}. Please hold on&#8230;`
+    : 'Confirming all your votes with Paystack&#8230;');
 
   let r;
   try {
     r = await apiFetch(`/voting/verify-batch/${ref}`);
   } catch (e) {
-    r = { ok: false, status: 0, data: { message: 'Network error', networkError: true } };
+    r = { ok: false, status: 0, data: { networkError: true } };
   }
 
+  /* SUCCESS ✓ */
   if (r.ok && r.data.success) {
+    sessionStorage.removeItem('nacos_batch_ref');
+    sessionStorage.removeItem('nacos_pending_ref');
+    Cart.clear();
+
+    const items      = r.data.items || [];
+    const totalVotes = items.reduce((s, i) => s + (i.quantity || 0), 0);
     setIcon('ok');
     setTitle('All Votes Recorded!');
+    setMsg(`<strong>${totalVotes} vote(s)</strong> recorded across <strong>${items.length} nominee(s)</strong>. Thank you!`);
 
-    const items = r.data.items || [];
-    const totalVotes = items.reduce((s, i) => s + (i.quantity || 0), 0);
-    setMsg(`<strong>${totalVotes} vote(s)</strong> recorded across <strong>${items.length} nominee(s)</strong>. Thank you for participating!`);
-
-    // Build per-item detail table
     const rows = items.map(i => `
       <tr>
         <td style="padding:.45rem .6rem;border-bottom:1px solid rgba(255,255,255,.07);">${i.contestantName || i.contestantId}</td>
         <td style="padding:.45rem .6rem;border-bottom:1px solid rgba(255,255,255,.07);text-align:center;">${i.quantity}</td>
         <td style="padding:.45rem .6rem;border-bottom:1px solid rgba(255,255,255,.07);text-align:center;">
           <span style="color:${i.status==='success'||i.status==='already_recorded'?'#4ade80':'#f87171'};">
-            ${i.status==='success'||i.status==='already_recorded' ? '✓ Recorded' : '⚠ Check support'}
+            ${i.status==='success'||i.status==='already_recorded' ? '✓' : '⚠'}
           </span>
         </td>
       </tr>`).join('');
 
-    const table = `
+    setExtra(`
       <div style="margin:1rem 0;overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
-          <thead>
-            <tr style="color:var(--gold);">
-              <th style="padding:.45rem .6rem;text-align:left;border-bottom:1px solid var(--border-gold);">Nominee</th>
-              <th style="padding:.45rem .6rem;text-align:center;border-bottom:1px solid var(--border-gold);">Votes</th>
-              <th style="padding:.45rem .6rem;text-align:center;border-bottom:1px solid var(--border-gold);">Status</th>
-            </tr>
-          </thead>
+          <thead><tr style="color:var(--gold);">
+            <th style="padding:.45rem .6rem;text-align:left;border-bottom:1px solid var(--border-gold);">Nominee</th>
+            <th style="padding:.45rem .6rem;text-align:center;border-bottom:1px solid var(--border-gold);">Votes</th>
+            <th style="padding:.45rem .6rem;text-align:center;border-bottom:1px solid var(--border-gold);">✓</th>
+          </tr></thead>
           <tbody>${rows}</tbody>
         </table>
-      </div>`;
-
-   setExtra(table + refBadge(ref) + actionBtns(ref));
-
-sessionStorage.removeItem('nacos_batch_ref');
-
-Cart.clear();
-return;
-  }
-
-  const netErr = r.data?.networkError || r.status === 503 || r.status === 0;
-  if (netErr && attempts < MAX) {
-    setMsg(`Payment gateway is slow to respond — retrying (${attempts}/${MAX})&#8230;`);
-    setTimeout(() => verifyBatch(ref), DELAY);
-    return;
-  }
-
-  if (r.status === 404 && attempts < MAX) {
-    setMsg(`Payment processing — confirming (${attempts}/${MAX})&#8230;`);
-    setTimeout(() => verifyBatch(ref), DELAY);
-    return;
-  }
-
-  setIcon('err');
-  if (r.status === 400) {
-    setTitle('Payment Not Completed');
-    setMsg(r.data.message || 'The payment did not go through. No charge was made.');
-    setExtra(`
-      ${refBadge(ref)}
-      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
-        <a href="checkout.html"  class="btn btn-gold">Try Again</a>
-        <a href="categories.html" class="btn btn-outline">Back to Voting</a>
-      </div>`);
-  } else {
-    setTitle('Verification Pending');
-    setMsg('We could not automatically confirm your payment. If money was deducted, your votes are most likely recorded. Check the leaderboard or retry below.');
-    setExtra(`
-      ${refBadge(ref)}
-      <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
-        <a href="leaderboard.html" class="btn btn-primary">Check Standings</a>
-        <button onclick="resetAndRetry('${ref}')" class="btn btn-outline">Retry Now</button>
       </div>
-      <p style="font-size:.75rem;color:var(--text-muted);margin-top:.75rem;">
-        Still stuck? Email support quoting the reference above.
-      </p>`);
+      ${refBadge(ref)}${actionBtns()}`);
+    return;
   }
+
+  /* NETWORK / GATEWAY TIMEOUT — retry */
+  const isNetErr = r.data?.networkError || r.status === 503 || r.status === 0;
+  if (isNetErr) {
+    if (attempts <= RETRY_DELAYS.length) {
+      const wait = RETRY_DELAYS[attempts - 1];
+      setIcon('wait');
+      setMsg(`Payment gateway is slow (Nigerian network). Retrying in ${Math.round(wait/1000)}s — ${attempts}/${RETRY_DELAYS.length + 1}&#8230;`);
+      setTimeout(() => verifyBatch(ref), wait);
+      return;
+    }
+    setIcon('warn');
+    setTitle('Could Not Confirm Yet');
+    setMsg('We cannot reach Paystack right now. <strong>If money left your account, your votes are most likely recorded.</strong>');
+    setExtra(refBadge(ref) + retryBtns(ref));
+    return;
+  }
+
+  /* NOT FOUND YET — still processing */
+  if (r.status === 404 && attempts <= RETRY_DELAYS.length) {
+    const wait = RETRY_DELAYS[attempts - 1];
+    setMsg(`Waiting for batch record (${attempts}/${RETRY_DELAYS.length + 1})&#8230;`);
+    setTimeout(() => verifyBatch(ref), wait);
+    return;
+  }
+
+  /* ABANDONED / CANCELLED */
+  if (r.status === 400 && (r.data?.abandoned || r.data?.cancelled)) {
+    sessionStorage.removeItem('nacos_batch_ref');
+    sessionStorage.removeItem('nacos_pending_ref');
+    setIcon('warn');
+    setTitle('Payment Not Completed');
+    setMsg('You closed the payment page before completing. <strong>No money was taken.</strong> Your cart is still saved.');
+    setExtra(refBadge(ref) + tryAgainBtns());
+    return;
+  }
+
+  /* PAYMENT FAILED */
+  if (r.status === 400) {
+    sessionStorage.removeItem('nacos_batch_ref');
+    setIcon('err');
+    setTitle('Payment Declined');
+    setMsg(r.data.message || 'The payment did not go through. No charge was made. Your cart is still saved.');
+    setExtra(refBadge(ref) + tryAgainBtns());
+    return;
+  }
+
+  /* UNEXPECTED */
+  setIcon('warn');
+  setTitle('Verification Delayed');
+  setMsg('Something went wrong on our end. <strong>If money left your account, your votes are most likely recorded.</strong>');
+  setExtra(refBadge(ref) + retryBtns(ref));
 }
 
-function resetAndRetry(ref) {
+function resetAndRetry() {
   attempts = 0;
   setIcon('wait');
-  setTitle('Retrying Verification&#8230;');
+  setTitle('Checking Again&#8230;');
   setMsg('Please wait.');
   setExtra('');
-  verify();
+  if (window._verifyRef) {
+    isBatchRef(window._verifyRef) ? verifyBatch(window._verifyRef) : verifySingle(window._verifyRef);
+  } else {
+    verify();
+  }
 }
 
 document.addEventListener('DOMContentLoaded', verify);
