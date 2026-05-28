@@ -93,7 +93,7 @@ exports.initializePayment = asyncHandler(async (req, res) => {
     // Check if there is STILL a very-recent pending TX (< 30 min old) — block those
     const { data: recentPending } = await supabase
       .from('transactions')
-      .select('id, created_at')
+      .select('id, reference, batch_reference, created_at')
       .eq('user_id', req.user.id)
       .eq('status', 'pending')
       .gte('created_at', thirtyMinAgo)
@@ -101,9 +101,12 @@ exports.initializePayment = asyncHandler(async (req, res) => {
 
     if (recentPending && recentPending.length > 0) {
       const age = Math.round((Date.now() - new Date(recentPending[0].created_at)) / 1000);
+      // Also send back the stuck reference so frontend can cancel by ref if needed
+      const stuckRef = recentPending[0].batch_reference || recentPending[0].reference || null;
       return res.status(400).json({
         message: `You have a payment in progress (started ${age}s ago). Please complete it or wait 30 minutes.`,
-        canForce: true  // tells frontend to show "Cancel old & retry" button
+        canForce: true,
+        pendingReference: stuckRef
       });
     }
   }
@@ -297,7 +300,7 @@ exports.initializeBatchPayment = asyncHandler(async (req, res) => {
 
     const { data: recentPending } = await supabase
       .from('transactions')
-      .select('id, created_at')
+      .select('id, reference, batch_reference, created_at')
       .eq('user_id', req.user.id)
       .eq('status', 'pending')
       .gte('created_at', thirtyMinAgo)
@@ -305,9 +308,11 @@ exports.initializeBatchPayment = asyncHandler(async (req, res) => {
 
     if (recentPending && recentPending.length > 0) {
       const age = Math.round((Date.now() - new Date(recentPending[0].created_at)) / 1000);
+      const stuckRef = recentPending[0].batch_reference || recentPending[0].reference || null;
       return res.status(400).json({
         message: `You have a payment in progress (started ${age}s ago). Please complete it or wait 30 minutes.`,
-        canForce: true
+        canForce: true,
+        pendingReference: stuckRef
       });
     }
   }
@@ -553,6 +558,38 @@ exports.cancelPayment = asyncHandler(async (req, res) => {
   const ref = String(req.params.reference || '').toUpperCase().trim();
   if (!ref) return res.status(400).json({ message: 'Reference required.' });
 
+  // Batch references (BT-...) are stored in batch_reference column, not reference column
+  const isBatch = ref.startsWith('BT-');
+
+  if (isBatch) {
+    // Look up any row with this batch_reference to check existence/status
+    const { data: rows } = await supabase
+      .from('transactions')
+      .select('status')
+      .eq('batch_reference', ref)
+      .eq('status', 'pending')
+      .limit(1);
+
+    if (!rows || rows.length === 0) {
+      // Check if it exists at all (might already be cancelled/completed)
+      const { data: anyRows } = await supabase
+        .from('transactions').select('status').eq('batch_reference', ref).limit(1);
+      if (!anyRows || anyRows.length === 0)
+        return res.status(404).json({ message: 'Transaction not found.' });
+      return res.json({ success: true, message: `Transaction is already ${anyRows[0].status}.` });
+    }
+
+    await supabase
+      .from('transactions')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('batch_reference', ref)
+      .eq('status', 'pending');
+
+    console.log('[CANCEL] Batch cancelled by user:', ref);
+    return res.json({ success: true, message: 'Transaction cancelled. You can vote again.' });
+  }
+
+  // Single reference (VT-...)
   const { data: tx } = await supabase
     .from('transactions').select('status, user_id').eq('reference', ref).single();
 

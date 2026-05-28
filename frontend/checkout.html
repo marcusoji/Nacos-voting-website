@@ -158,16 +158,22 @@ async function handlePayment() {
       if (tryCancel) {
         setLoading(btn, true);
         try {
-          // Try auth cancel first; fall back to reference cancel for guests
-          const pendingRef = sessionStorage.getItem('nacos_pending_ref');
+          // Server returns pendingReference — the actual stuck TX ref/batch ref
+          const stuckRef = r.data.pendingReference;
           let cancelled = false;
+
+          // Primary: cancel all pending for this user (works for logged-in users)
           const cr = await apiFetch('/voting/cancel-pending', { method: 'POST' });
-          if (cr.ok) {
+          if (cr.ok && cr.data?.success) {
             cancelled = true;
-          } else if (pendingRef) {
-            const cr2 = await apiFetch(`/voting/cancel/${pendingRef}`, { method: 'POST' });
+          }
+
+          // Fallback: cancel by specific reference (works for both single & batch)
+          if (!cancelled && stuckRef) {
+            const cr2 = await apiFetch(`/voting/cancel/${encodeURIComponent(stuckRef)}`, { method: 'POST' });
             if (cr2.ok) cancelled = true;
           }
+
           if (cancelled) {
             sessionStorage.removeItem('nacos_pending_ref');
             sessionStorage.removeItem('nacos_batch_ref');
