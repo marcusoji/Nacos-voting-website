@@ -16,9 +16,10 @@ router.get('/verify/:reference',  optionalSession, vc.verifyPaymentEndpoint);
 router.post('/initialize-batch', optionalSession, paymentLimiter, vc.initializeBatchPayment);
 router.get('/verify-batch/:batchReference', optionalSession, vc.verifyBatchPayment);
 
-// CANCEL + STATUS (no auth — user may not be logged in)
+// CANCEL (no auth needed — user may not be logged in on redirect)
 router.post('/cancel/:reference',  vc.cancelPayment);
-router.get('/status/:reference',   vc.getTransactionStatus);
+// CANCEL ALL PENDING for logged-in user
+router.post('/cancel-pending', optionalSession, vc.cancelAllPending);
 
 // WEBHOOK
 router.post('/webhook', vc.handleWebhook);

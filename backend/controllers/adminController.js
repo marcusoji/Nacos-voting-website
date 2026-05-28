@@ -194,27 +194,21 @@ exports.getTransactions = async (req, res) => {
   } catch(err) { return res.status(500).json({ success: false, message: err.message }); }
 };
 
+
 // ── POST /api/admin/transactions/:ref/force-approve ──────────
-// Admin manually approves a pending transaction after confirming
-// payment was received (e.g. bank transfer, manual verification).
+// Admin manually credits votes after confirming payment was received.
 exports.forceApproveTransaction = async (req, res) => {
   try {
     const ref = String(req.params.ref || '').toUpperCase().trim();
-    if (!ref) return res.status(400).json({ message: 'Reference is required.' });
+    if (!ref) return res.status(400).json({ message: 'Reference required.' });
 
     const { data: tx, error: txErr } = await supabase
       .from('transactions').select('*').eq('reference', ref).single();
 
-    if (txErr || !tx)
-      return res.status(404).json({ message: 'Transaction not found.' });
-
+    if (txErr || !tx) return res.status(404).json({ message: 'Transaction not found.' });
     if (tx.status === 'success')
-      return res.json({ success: true, message: 'Already recorded — votes are credited.' });
+      return res.json({ success: true, message: 'Already recorded — votes are already credited.' });
 
-    if (tx.status === 'cancelled')
-      return res.status(400).json({ message: 'This transaction was cancelled. Create a new one instead.' });
-
-    // Process votes atomically via the same RPC used by normal verify
     const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
       p_tx_ref: ref,
       p_cat_id: tx.category_id,
@@ -224,14 +218,10 @@ exports.forceApproveTransaction = async (req, res) => {
     });
 
     if (rpcErr) {
-      console.error('[FORCE APPROVE RPC]', rpcErr.message, '| ref:', ref);
+      console.error('[FORCE APPROVE RPC]', rpcErr.message);
       return res.status(500).json({ message: `RPC error: ${rpcErr.message}` });
     }
 
-    // Log who approved it
-    console.log(`[FORCE APPROVE] ref:${ref} approved by admin:${req.user?.id} | qty:${tx.quantity}`);
-
-    // Add audit log entry
     await supabase.from('audit_logs').insert({
       user_id   : req.user?.id,
       action    : 'FORCE_APPROVE_TRANSACTION',
@@ -239,56 +229,52 @@ exports.forceApproveTransaction = async (req, res) => {
       ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
     }).catch(() => {});
 
-    if (!processed) {
-      return res.json({ success: true, message: 'Votes were already recorded (webhook beat you to it).' });
-    }
-
+    console.log(`[FORCE APPROVE] ref:${ref} by admin:${req.user?.id} qty:${tx.quantity}`);
     res.json({
-      success : true,
-      message : `✓ ${tx.quantity} vote(s) credited for reference ${ref}.`,
-      quantity: tx.quantity,
+      success  : true,
+      message  : `✓ ${tx.quantity} vote(s) credited for ${ref}.`,
+      quantity : tx.quantity,
       reference: ref
     });
   } catch (err) {
-    console.error('[FORCE APPROVE]', err.message);
     res.status(500).json({ message: err.message });
   }
 };
-// Delete transaction
+
+// ── DELETE /api/admin/transactions/:ref ──────────────────────
+// Admin deletes a transaction record (cancelled, failed, or erroneous ones).
+// Does NOT reverse votes if already credited — use with caution.
 exports.deleteTransaction = async (req, res) => {
   try {
-    const ref = String(req.params.ref || '').toUpperCase();
+    const ref = String(req.params.ref || '').toUpperCase().trim();
+    if (!ref) return res.status(400).json({ message: 'Reference required.' });
 
-    if (!ref) {
+    const { data: tx } = await supabase
+      .from('transactions').select('status').eq('reference', ref).single();
+
+    if (!tx) return res.status(404).json({ message: 'Transaction not found.' });
+
+    if (tx.status === 'success') {
       return res.status(400).json({
-        success: false,
-        message: 'Transaction reference required.'
+        message: 'Cannot delete a successful transaction — it has credited votes. Use force-approve to fix errors instead.'
       });
     }
 
     const { error } = await supabase
-      .from('transactions')
-      .delete()
-      .eq('reference', ref);
+      .from('transactions').delete().eq('reference', ref);
 
-    if (error) {
-      return res.status(500).json({
-        success: false,
-        message: error.message
-      });
-    }
+    if (error) return res.status(500).json({ message: error.message });
 
-    res.json({
-      success: true,
-      message: 'Transaction deleted successfully.'
-    });
+    await supabase.from('audit_logs').insert({
+      user_id   : req.user?.id,
+      action    : 'DELETE_TRANSACTION',
+      target    : ref,
+      ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
+    }).catch(() => {});
 
+    console.log(`[DELETE TX] ref:${ref} deleted by admin:${req.user?.id}`);
+    res.json({ success: true, message: `Transaction ${ref} deleted.` });
   } catch (err) {
-    console.error('[DELETE TX ERROR]', err.message);
-
-    res.status(500).json({
-      success: false,
-      message: 'Server error.'
-    });
+    res.status(500).json({ message: err.message });
   }
 };

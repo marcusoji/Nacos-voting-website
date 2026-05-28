@@ -145,9 +145,30 @@ async function handlePayment() {
     });
 
     if (r.ok && r.data.authorization_url) {
-      // Store batch reference so payment-success page can verify all items
-      sessionStorage.setItem('nacos_batch_ref', r.data.batchReference);
+      // Store reference in sessionStorage so checkout.html can auto-cancel
+      // if user hits back button without completing payment
+      const pendingRef = r.data.batchReference || r.data.reference;
+      if (pendingRef) {
+        sessionStorage.setItem('nacos_pending_ref', pendingRef);
+        if (r.data.batchReference) sessionStorage.setItem('nacos_batch_ref', r.data.batchReference);
+      }
       window.location.href = r.data.authorization_url;
+    } else if (r.data?.canForce) {
+      // User has a recent pending TX — offer to cancel it and retry
+      setLoading(btn, false, 'Pay with Paystack');
+      const tryCancel = confirm(
+        r.data.message + '\n\nClick OK to cancel the old payment and start fresh.\nClick Cancel to wait.'
+      );
+      if (tryCancel) {
+        try {
+          const cr = await apiFetch('/voting/cancel-pending', { method: 'POST' });
+          if (cr.ok) {
+            Toast.info('Cleared', 'Old payment cancelled. Please try voting again.');
+            sessionStorage.removeItem('nacos_pending_ref');
+            sessionStorage.removeItem('nacos_batch_ref');
+          }
+        } catch { Toast.error('Error', 'Could not cancel. Please wait 30 minutes.'); }
+      }
     } else {
       Toast.error('Payment Error', r.data.message || 'Failed to initialize payment.');
       setLoading(btn, false, '\uD83D\uDD10 Pay with Paystack');
@@ -159,7 +180,23 @@ Toast.error('Error', err.message || 'Network error. Please try again.');
   }
 }
 
-document.addEventListener('DOMContentLoaded', renderCheckout);
+document.addEventListener('DOMContentLoaded', async () => {
+  // If user pressed back from Paystack, there may be a stale pending TX.
+  // Detect it via sessionStorage and auto-cancel so they can retry immediately.
+  const staleRef = sessionStorage.getItem('nacos_pending_ref');
+  if (staleRef) {
+    sessionStorage.removeItem('nacos_pending_ref');
+    sessionStorage.removeItem('nacos_batch_ref');
+    // Silently cancel the stale pending transaction
+    try {
+      await apiFetch(`/voting/cancel/${staleRef}`, { method: 'POST' });
+      console.log('[CHECKOUT] Stale pending TX auto-cancelled:', staleRef);
+    } catch {}
+    // Also cancel all pending for logged-in user as a safety net
+    try { await apiFetch('/voting/cancel-pending', { method: 'POST' }); } catch {}
+  }
+  renderCheckout();
+});
 </script>
 </body>
 </html>

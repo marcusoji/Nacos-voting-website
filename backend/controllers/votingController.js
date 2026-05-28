@@ -3,27 +3,6 @@ const paystackService = require('../services/paystackService');
 const asyncHandler    = require('../utils/asyncHandler');
 const crypto          = require('crypto');
 
-// Auto-clean old pending transactions
-async function cleanupOldPendingTransactions(userId) {
-  if (!userId) return;
-
-  // Older than 10 minutes
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-
-  const { error } = await supabase
-    .from('transactions')
-    .update({
-      status: 'cancelled',
-      updated_at: new Date().toISOString()
-    })
-    .eq('user_id', userId)
-    .eq('status', 'pending')
-    .lt('created_at', tenMinutesAgo);
-
-  if (error) {
-    console.error('[PENDING CLEANUP ERROR]', error.message);
-  }
-}
 const makeRef = () => `VT-${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
 
 const resolveEmail = (req) => {
@@ -96,26 +75,38 @@ exports.initializePayment = asyncHandler(async (req, res) => {
   if (!email)
     return res.status(400).json({ message: 'An email address is required.' });
 
- if (req.user) {
+  // ── Auto-expire stale pending transactions ──────────────────
+  // If user cancelled Paystack and hit back, their old TX stays 'pending'.
+  // We auto-expire any pending TX older than 30 minutes for this user,
+  // then allow a new one. This prevents the "you have a pending transaction"
+  // block from firing after a simple cancel.
+  if (req.user) {
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    // Mark stale pending transactions as cancelled (not failed — different UX meaning)
+    await supabase
+      .from('transactions')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('user_id', req.user.id)
+      .eq('status', 'pending')
+      .lt('created_at', thirtyMinAgo);
 
-  // First cleanup stale pending transactions
-  
+    // Check if there is STILL a very-recent pending TX (< 30 min old) — block those
+    const { data: recentPending } = await supabase
+      .from('transactions')
+      .select('id, created_at')
+      .eq('user_id', req.user.id)
+      .eq('status', 'pending')
+      .gte('created_at', thirtyMinAgo)
+      .limit(1);
 
-  const { data: pending } = await supabase
-    .from('transactions')
-    .select('id, created_at')
-    .eq('user_id', req.user.id)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false })
-    .limit(1);
-    await cleanupOldPendingTransactions(req.user.id);
-
-  if (pending && pending.length > 0) {
-    return res.status(400).json({
-      message: 'You already have a payment still processing. If you cancelled Paystack, wait a few seconds and try again.'
-    });
+    if (recentPending && recentPending.length > 0) {
+      const age = Math.round((Date.now() - new Date(recentPending[0].created_at)) / 1000);
+      return res.status(400).json({
+        message: `You have a payment in progress (started ${age}s ago). Please complete it or wait 30 minutes.`,
+        canForce: true  // tells frontend to show "Cancel old & retry" button
+      });
+    }
   }
-}
 
   const reference    = makeRef();
   const amountInKobo = qty * 50 * 100;   // qty × ₦50 × 100 kobo/naira
@@ -296,19 +287,30 @@ exports.initializeBatchPayment = asyncHandler(async (req, res) => {
   if (!email)
     return res.status(400).json({ message: 'An email address is required.' });
   if (req.user) {
-  const { data: pending } = await supabase
-    .from('transactions')
-    .select('id')
-    .eq('user_id', req.user.id)
-    .eq('status', 'pending')
-    .limit(1);
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    await supabase
+      .from('transactions')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('user_id', req.user.id)
+      .eq('status', 'pending')
+      .lt('created_at', thirtyMinAgo);
 
-  if (pending && pending.length > 0) {
-    return res.status(400).json({
-      message: 'You already have a pending payment.'
-    });
+    const { data: recentPending } = await supabase
+      .from('transactions')
+      .select('id, created_at')
+      .eq('user_id', req.user.id)
+      .eq('status', 'pending')
+      .gte('created_at', thirtyMinAgo)
+      .limit(1);
+
+    if (recentPending && recentPending.length > 0) {
+      const age = Math.round((Date.now() - new Date(recentPending[0].created_at)) / 1000);
+      return res.status(400).json({
+        message: `You have a payment in progress (started ${age}s ago). Please complete it or wait 30 minutes.`,
+        canForce: true
+      });
+    }
   }
-}
 
   // Validate every contestant
   const resolved = [];
@@ -543,23 +545,18 @@ exports.handleWebhook = asyncHandler(async (req, res) => {
     console.error('[WEBHOOK ERROR]', err.message);
   }
 });
+
 // ── POST /api/voting/cancel/:reference ───────────────────────
-// Called when user cancels on Paystack checkout page.
-// Marks the transaction 'cancelled' so the pending-guard unblocks.
+// Marks a pending transaction as cancelled so the pending-guard unblocks.
+// Called when user explicitly wants to abandon a stuck payment.
 exports.cancelPayment = asyncHandler(async (req, res) => {
-  const { reference } = req.params;
-  if (!reference || typeof reference !== 'string' || reference.length > 100)
-    return res.status(400).json({ message: 'Invalid reference.' });
+  const ref = String(req.params.reference || '').toUpperCase().trim();
+  if (!ref) return res.status(400).json({ message: 'Reference required.' });
 
-  const ref = reference.toUpperCase();
-
-  // Only cancel if still pending — idempotent for already-cancelled
   const { data: tx } = await supabase
-    .from('transactions').select('status').eq('reference', ref).single();
+    .from('transactions').select('status, user_id').eq('reference', ref).single();
 
-  if (!tx)
-    return res.status(404).json({ message: 'Transaction not found.' });
-
+  if (!tx) return res.status(404).json({ message: 'Transaction not found.' });
   if (tx.status !== 'pending')
     return res.json({ success: true, message: `Transaction is already ${tx.status}.` });
 
@@ -569,34 +566,24 @@ exports.cancelPayment = asyncHandler(async (req, res) => {
     .eq('reference', ref)
     .eq('status', 'pending');
 
-  console.log('[CANCEL] Transaction cancelled by user:', ref);
-  res.json({ success: true, message: 'Transaction cancelled.' });
+  console.log('[CANCEL] Cancelled by user:', ref);
+  res.json({ success: true, message: 'Transaction cancelled. You can vote again.' });
 });
 
-// ── GET /api/voting/status/:reference ────────────────────────
-// Last-resort DB status check for when Paystack is unreachable.
-// Returns the DB status without calling Paystack at all.
-exports.getTransactionStatus = asyncHandler(async (req, res) => {
-  const { reference } = req.params;
-  if (!reference || typeof reference !== 'string' || reference.length > 100)
-    return res.status(400).json({ message: 'Invalid reference.' });
+// ── POST /api/voting/cancel-pending ──────────────────────────
+// Cancels ALL pending transactions for the authenticated user.
+// Called when user clicks "Cancel old payment & try again".
+exports.cancelAllPending = asyncHandler(async (req, res) => {
+  if (!req.user) return res.status(401).json({ message: 'Login required.' });
 
-  const ref = reference.toUpperCase();
-
-  const { data: tx, error } = await supabase
+  const { error } = await supabase
     .from('transactions')
-    .select('reference, status, quantity, contestant_id, amount')
-    .eq('reference', ref)
-    .single();
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('user_id', req.user.id)
+    .eq('status', 'pending');
 
-  if (error || !tx)
-    return res.status(404).json({ message: 'Transaction not found.' });
+  if (error) return res.status(500).json({ message: error.message });
 
-  res.json({
-    success   : true,
-    reference : tx.reference,
-    status    : tx.status,
-    quantity  : tx.quantity,
-    contestantId: tx.contestant_id
-  });
+  console.log('[CANCEL ALL] Cleared pending for user:', req.user.id);
+  res.json({ success: true, message: 'Pending transactions cleared. You can vote again.' });
 });
