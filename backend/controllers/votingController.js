@@ -99,7 +99,7 @@ exports.initializePayment = asyncHandler(async (req, res) => {
  if (req.user) {
 
   // First cleanup stale pending transactions
-  await cleanupOldPendingTransactions(req.user.id);
+  
 
   const { data: pending } = await supabase
     .from('transactions')
@@ -108,6 +108,7 @@ exports.initializePayment = asyncHandler(async (req, res) => {
     .eq('status', 'pending')
     .order('created_at', { ascending: false })
     .limit(1);
+    await cleanupOldPendingTransactions(req.user.id);
 
   if (pending && pending.length > 0) {
     return res.status(400).json({
