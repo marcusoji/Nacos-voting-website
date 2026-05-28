@@ -131,7 +131,7 @@ matric_number: null,
       })
     });
     if (r.ok) {
-      Toast.success('Registered!', 'Check your email to verify your account.');
+      Toast.success('Registered!', 'Login to cast your vote.');
       setTimeout(() => window.location.href = 'login.html', 2000);
     } else {
       Toast.error('Registration Failed', r.data.message || 'Please check your details.');
