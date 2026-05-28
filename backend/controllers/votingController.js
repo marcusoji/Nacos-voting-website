@@ -574,7 +574,11 @@ exports.cancelPayment = asyncHandler(async (req, res) => {
 // Cancels ALL pending transactions for the authenticated user.
 // Called when user clicks "Cancel old payment & try again".
 exports.cancelAllPending = asyncHandler(async (req, res) => {
-  if (!req.user) return res.status(401).json({ message: 'Login required.' });
+  if (!req.user) {
+    // Guest users — nothing to cancel server-side (no user_id link),
+    // return success so the frontend doesn't show a false error.
+    return res.json({ success: false, guest: true, message: 'Not logged in — use reference cancel instead.' });
+  }
 
   const { error } = await supabase
     .from('transactions')
