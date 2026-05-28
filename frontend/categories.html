@@ -78,7 +78,6 @@ const CATS = [
   { slug:'freshman',                    name:'Freshman\nof the Year',                  gender:true,  male:'freshman-male.html',                   female:'freshman-female.html' },
   { slug:'creator',                     name:'Content Creator\nof the Year',           gender:true,  male:'creator-male.html',                    female:'creator-female.html' },
   { slug:'volunteer',                   name:'Volunteer\nof the Year',                 gender:false, page:'volunteer.html' },
-  { slug:'best-executive',              name:'Best\nExecutive',                        gender:false, page:'best-executive.html' },
   { slug:'best-dressed-coordinator',    name:'Best Dressed\nCoordinator',              gender:true,  male:'best-dressed-coordinator-male.html',   female:'best-dressed-coordinator-female.html' },
   { slug:'best-dressed',                name:'Best\nDressed',                          gender:true,  male:'best-dressed-male.html',               female:'best-dressed-female.html' },
   { slug:'best-coordinator',            name:'Best\nCoordinator',                      gender:true,  male:'best-coordinator-male.html',           female:'best-coordinator-female.html' }
@@ -89,7 +88,6 @@ const CAT_ICONS = {
   'freshman'                   : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
   'creator'                    : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`,
   'volunteer'                  : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`,
-  'best-executive'             : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/></svg>`,
   'best-dressed-coordinator'   : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M20.38 3.46L16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.57a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.57a2 2 0 0 0-1.34-2.23z"/></svg>`,
   'best-dressed'               : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>`,
   'best-coordinator'           : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
