@@ -1,70 +1,6 @@
 // controllers/authController.js
 const { supabase, supabaseAuth } = require('../config/db');
-const crypto    = require('crypto');
 const validator = require('validator');
-
-// ── Email sender via Resend ───────────────────────────────────
-async function sendResetEmail(toEmail, resetUrl) {
-  const key = process.env.RESEND_API_KEY;
-
-  if (!key) {
-    console.log('[PASSWORD RESET — no Resend key] URL:', resetUrl);
-    return;
-  }
-
-  // FIX: Use Resend's built-in test sender if domain isn't verified.
-  // "onboarding@resend.dev" works immediately without domain verification.
-  // For production: verify your domain at resend.com/domains then update RESEND_FROM_EMAIL.
-  const fromAddress = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
-
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method : 'POST',
-      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body   : JSON.stringify({
-        from   : fromAddress,
-        to     : [toEmail],
-        subject: 'NACOS Awards 2026 — Reset Your Password',
-        html   : `
-          <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;background:#0f1712;border-radius:12px;overflow:hidden;">
-            <div style="background:#006b3c;padding:24px 32px;">
-              <h1 style="color:#fff;margin:0;font-size:20px;">DELSU NACOS Awards 2026</h1>
-            </div>
-            <div style="padding:32px;">
-              <h2 style="color:#f0f4f1;font-size:22px;margin:0 0 16px;">Password Reset</h2>
-              <p style="color:#9db09a;line-height:1.7;margin:0 0 24px;">
-                You requested a password reset. Click the button below — this link expires in <strong style="color:#c9a14a;">1 hour</strong>.
-              </p>
-              <div style="text-align:center;margin:28px 0;">
-                <a href="${resetUrl}"
-                   style="display:inline-block;background:#c9a14a;color:#0a0f0d;padding:14px 32px;border-radius:8px;font-weight:700;font-size:16px;text-decoration:none;">
-                  Reset My Password
-                </a>
-              </div>
-              <p style="color:#637060;font-size:13px;margin:0;">
-                If you did not request this, you can safely ignore this email.
-              </p>
-              <p style="color:#637060;font-size:12px;margin-top:12px;word-break:break-all;">
-                Link: <a href="${resetUrl}" style="color:#c9a14a;">${resetUrl}</a>
-              </p>
-            </div>
-          </div>`
-      })
-    });
-
-    if (!response.ok) {
-      const errBody = await response.text();
-      // FIX: Log actual Resend error — previously silent, impossible to debug
-      console.error('[RESEND ERROR]', response.status, errBody);
-      console.log('[RESET URL — email failed, use this]', resetUrl);
-    } else {
-      console.log('[RESEND] Email sent to:', toEmail);
-    }
-  } catch (err) {
-    console.error('[RESEND NETWORK ERROR]', err.message);
-    console.log('[RESET URL — email failed, use this]', resetUrl);
-  }
-}
 
 const logAction = async (userId, action, target, req) => {
   try {
@@ -203,6 +139,11 @@ exports.getMe = async (req, res) => {
 };
 
 // ── POST /api/auth/forgot-password ───────────────────────────
+// Delegates entirely to Supabase — no custom token, no Resend.
+// Supabase will send its own branded reset email.
+// The redirect URL must be configured in your Supabase project:
+//   Authentication → URL Configuration → Redirect URLs
+//   Add: https://your-frontend.com/reset-password.html
 exports.requestPasswordReset = async (req, res) => {
   try {
     let { email } = req.body;
@@ -210,20 +151,25 @@ exports.requestPasswordReset = async (req, res) => {
       return res.status(400).json({ message: 'Valid email required.' });
     email = validator.normalizeEmail(email.trim());
 
-    const rawToken    = crypto.randomBytes(32).toString('hex');
-    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
-    const expiresAt   = new Date(Date.now() + 3_600_000).toISOString();
-
-    await supabase.from('password_resets').delete().eq('email', email);
-    await supabase.from('password_resets').insert({ email, token: hashedToken, expires_at: expiresAt });
-
     const frontendBase = (process.env.FRONTEND_URL || '')
       .split(',')[0].trim().replace(/\/$/, '');
-    const resetUrl = `${frontendBase}/reset-password.html?token=${rawToken}&email=${encodeURIComponent(email)}`;
+    const redirectTo = `${frontendBase}/reset-password.html`;
 
-    await sendResetEmail(email, resetUrl);
+    // Supabase sends the email; we do not handle delivery here.
+    // Error is intentionally swallowed so we never reveal whether
+    // an account exists (same security posture as before).
+    const { error } = await supabaseAuth.auth.resetPasswordForEmail(email, {
+      redirectTo
+    });
+
+    if (error) {
+      // Log for debugging but return generic message to client
+      console.error('[FORGOT-PASSWORD] Supabase error:', error.message);
+    }
+
     await logAction(null, 'PASSWORD_RESET_REQUEST', email, req);
 
+    // Always return 200 so attackers can't enumerate accounts
     return res.status(200).json({ message: 'If the account exists, reset instructions have been sent.' });
   } catch (err) {
     console.error('[FORGOT]', err.message);
@@ -232,33 +178,48 @@ exports.requestPasswordReset = async (req, res) => {
 };
 
 // ── POST /api/auth/reset-password ───────────────────────────
+// Accepts the access_token Supabase embedded in the recovery link.
+// Flow:
+//   1. User clicks Supabase email link → lands on reset-password.html
+//      with #access_token=...&type=recovery in the URL hash.
+//   2. Frontend extracts the token and POSTs it here along with the
+//      new password.
+//   3. We set a session for that token, then call updateUser to change
+//      the password, then immediately sign out.
 exports.resetPassword = async (req, res) => {
   try {
-    let { email, token, newPassword } = req.body;
-    if (!email || !token || !newPassword)
-      return res.status(400).json({ message: 'All fields are required.' });
+    const { access_token, newPassword } = req.body;
 
-    email = validator.normalizeEmail(email.trim());
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-
-    const { data: record, error: fetchErr } = await supabase.from('password_resets')
-      .select('*').eq('email', email).eq('token', hashedToken).single();
-
-    if (fetchErr || !record || new Date(record.expires_at) < new Date())
-      return res.status(400).json({ message: 'Invalid or expired reset token.' });
+    if (!access_token || !newPassword)
+      return res.status(400).json({ message: 'access_token and newPassword are required.' });
 
     if (!validator.isLength(newPassword, { min: 8 }))
       return res.status(400).json({ message: 'Password must be at least 8 characters.' });
 
-    const { data: profile } = await supabase.from('profiles')
-      .select('id').eq('email', email).single();
-    if (!profile) return res.status(404).json({ message: 'Account not found.' });
+    // Establish a session from the recovery token so we can call updateUser
+    const { data: sessionData, error: sessionErr } =
+      await supabaseAuth.auth.setSession({
+        access_token,
+        refresh_token: access_token   // Supabase recovery tokens double as refresh tokens
+      });
 
-    const { error: updateErr } = await supabase.auth.admin.updateUserById(profile.id, { password: newPassword });
-    if (updateErr) return res.status(500).json({ message: 'Failed to update password.' });
+    if (sessionErr || !sessionData?.user) {
+      console.error('[RESET] setSession error:', sessionErr?.message);
+      return res.status(400).json({ message: 'Invalid or expired reset link. Please request a new one.' });
+    }
 
-    await supabase.from('password_resets').delete().eq('email', email);
-    await logAction(profile.id, 'PASSWORD_RESET_COMPLETE', email, req);
+    // Update the password while authenticated as this user
+    const { error: updateErr } = await supabaseAuth.auth.updateUser({ password: newPassword });
+
+    if (updateErr) {
+      console.error('[RESET] updateUser error:', updateErr.message);
+      return res.status(400).json({ message: updateErr.message || 'Failed to update password.' });
+    }
+
+    // Sign out this ephemeral session so the recovery token can't be reused
+    await supabaseAuth.auth.signOut();
+
+    await logAction(sessionData.user.id, 'PASSWORD_RESET_COMPLETE', sessionData.user.email, req);
 
     return res.status(200).json({ message: 'Password updated. You can now log in.' });
   } catch (err) {
