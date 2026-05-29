@@ -122,7 +122,7 @@ exports.initializePayment = asyncHandler(async (req, res) => {
   if (!paymentData?.data?.authorization_url)
     return res.status(502).json({ message: 'Payment gateway failed to initialize. Please try again.' });
 
-  await supabase.from('transactions').insert([{
+  const { error: insertErr } = await supabase.from('transactions').insert([{
     user_id      : req.user?.id || null,
     reference,
     amount       : amountNaira,    // ← Naira in DB (e.g. 50 for 1 vote)
@@ -139,6 +139,11 @@ exports.initializePayment = asyncHandler(async (req, res) => {
       ip             : req.ip
     }
   }]);
+
+  if (insertErr) {
+    console.error('[INIT] DB insert failed for ref:', reference, '|', insertErr.message);
+    return res.status(500).json({ message: 'Failed to record transaction. Please try again.' });
+  }
 
   console.log('[INIT] ref:', reference, '| qty:', qty, '| naira:', amountNaira, '| kobo:', amountInKobo);
   res.json({ success: true, authorization_url: paymentData.data.authorization_url, reference });
