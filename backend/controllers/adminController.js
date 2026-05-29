@@ -197,11 +197,66 @@ exports.getTransactions = async (req, res) => {
 
 // ── POST /api/admin/transactions/:ref/force-approve ──────────
 // Admin manually credits votes after confirming payment was received.
+// Supports both single refs (VT-...) and batch refs (BT-...).
 exports.forceApproveTransaction = async (req, res) => {
   try {
     const ref = String(req.params.ref || '').toUpperCase().trim();
     if (!ref) return res.status(400).json({ message: 'Reference required.' });
 
+    const isBatch = ref.startsWith('BT-');
+
+    // ── Batch reference: find all rows sharing this batch_reference ──
+    if (isBatch) {
+      const { data: txRows, error: txErr } = await supabase
+        .from('transactions').select('*').eq('batch_reference', ref);
+
+      if (txErr || !txRows || txRows.length === 0)
+        return res.status(404).json({ message: 'Batch transaction not found.' });
+
+      const pending = txRows.filter(t => t.status !== 'success');
+      if (pending.length === 0)
+        return res.json({ success: true, message: 'Already recorded — all votes in this batch are already credited.' });
+
+      const errors = [];
+      let totalQty = 0;
+
+      for (const tx of pending) {
+        const { error: rpcErr } = await supabase.rpc('process_vote_transaction', {
+          p_tx_ref: tx.reference,
+          p_cat_id: tx.category_id,
+          p_con_id: tx.contestant_id,
+          p_usr_id: tx.user_id || null,
+          p_qty   : tx.quantity
+        });
+        if (rpcErr) {
+          console.error('[FORCE APPROVE BATCH RPC]', tx.reference, rpcErr.message);
+          errors.push(`${tx.reference}: ${rpcErr.message}`);
+        } else {
+          totalQty += tx.quantity;
+        }
+      }
+
+      await supabase.from('audit_logs').insert({
+        user_id   : req.user?.id,
+        action    : 'FORCE_APPROVE_BATCH',
+        target    : ref,
+        ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
+      }).catch(() => {});
+
+      console.log(`[FORCE APPROVE BATCH] ref:${ref} by admin:${req.user?.id} qty:${totalQty} errors:${errors.length}`);
+
+      if (errors.length > 0)
+        return res.status(207).json({ success: false, message: `Partial approval — ${errors.length} row(s) failed.`, errors });
+
+      return res.json({
+        success  : true,
+        message  : `✓ ${totalQty} vote(s) credited for batch ${ref}.`,
+        quantity : totalQty,
+        reference: ref
+      });
+    }
+
+    // ── Single reference (VT-...) ────────────────────────────────
     const { data: tx, error: txErr } = await supabase
       .from('transactions').select('*').eq('reference', ref).single();
 
@@ -209,7 +264,7 @@ exports.forceApproveTransaction = async (req, res) => {
     if (tx.status === 'success')
       return res.json({ success: true, message: 'Already recorded — votes are already credited.' });
 
-    const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
+    const { error: rpcErr } = await supabase.rpc('process_vote_transaction', {
       p_tx_ref: ref,
       p_cat_id: tx.category_id,
       p_con_id: tx.contestant_id,
