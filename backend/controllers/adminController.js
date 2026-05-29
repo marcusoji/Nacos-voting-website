@@ -191,140 +191,115 @@ exports.getTransactions = async (req, res) => {
 };
 
 // ── POST /api/admin/transactions/:ref/force-approve ──────────
+// ── POST /api/admin/transactions/:ref/force-approve ──────────
+// Upgraded to dynamically create missing transactions on the fly
 exports.forceApproveTransaction = async (req, res) => {
   try {
     const ref = String(req.params.ref || '').toUpperCase().trim();
     if (!ref) return res.status(400).json({ message: 'Reference required.' });
 
-    // ── Step 1: Exact Reference Match Match ───────────
-    const { data: exactTx } = await supabase
+    // Grab extra payload fields from body in case we need to create a missing row
+    const { category_id, contestant_id, quantity, amount, user_id } = req.body;
+
+    // ── Step 1: Try exact reference match ───────────
+    let { data: exactTx } = await supabase
       .from('transactions').select('*').eq('reference', ref).maybeSingle();
 
-    if (exactTx) {
-      if (exactTx.status === 'success')
-        return res.json({ success: true, message: 'Already recorded — votes are already credited.' });
-
-      // Re-open cancelled/failed TX to 'pending' FIRST so the RPC can catch it.
-      if (['cancelled', 'failed'].includes(exactTx.status)) {
-        const { error: reopenErr } = await supabase
-          .from('transactions')
-          .update({ 
-            status: 'pending', 
-            updated_at: new Date().toISOString(),
-            admin_override: true 
-          })
-          .eq('reference', ref);
-          
-        if (reopenErr) {
-          console.error('[FORCE APPROVE REOPEN]', reopenErr.message);
-          return res.status(500).json({ message: `Failed to re-open transaction: ${reopenErr.message}` });
-        }
-        console.log(`[FORCE APPROVE] Re-opened ${exactTx.status} TX for processing: ${ref}`);
-      }
-
-      // NOW process the database RPC function safely
-      const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
-        p_tx_ref: ref,
-        p_cat_id: exactTx.category_id,
-        p_con_id: exactTx.contestant_id,
-        p_usr_id: exactTx.user_id || null,
-        p_qty   : exactTx.quantity
-      });
-
-      if (rpcErr) {
-        console.error('[FORCE APPROVE RPC]', rpcErr.message);
-        return res.status(500).json({ message: `Vote processing failed: ${rpcErr.message}` });
-      }
-
-      if (!processed) {
-        return res.status(400).json({ message: 'Transaction already processed or could not be approved.' });
-      }
-
-      // Write to log history
-      await supabase.from('audit_logs').insert({
-        user_id   : req.user?.id,
-        action    : 'FORCE_APPROVE_TRANSACTION',
-        target    : ref,
-        ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
-      }).catch(() => {});
-
-      return res.json({
-        success  : true,
-        message  : `✓ ${exactTx.quantity} vote(s) credited for ${ref}.`,
-        quantity : exactTx.quantity,
-        reference: ref
-      });
-    }
-
-    // ── Step 2: Batch reference (Pure BT- ref) ──
-    if (ref.startsWith('BT-')) {
-      const { data: txRows, error: txErr } = await supabase
-        .from('transactions').select('*').eq('batch_reference', ref);
-
-      if (txErr || !txRows || txRows.length === 0)
-        return res.status(404).json({ message: 'Transaction not found.' });
-
-      const pending = txRows.filter(t => t.status !== 'success');
-      if (pending.length === 0)
-        return res.json({ success: true, message: 'Already recorded — all votes in this batch are already credited.' });
-
-      const nonPending = pending.filter(t => t.status !== 'pending');
-      if (nonPending.length > 0) {
-        const { error: reopenErr } = await supabase
-          .from('transactions')
-          .update({ status: 'pending', updated_at: new Date().toISOString(), admin_override: true })
-          .eq('batch_reference', ref)
-          .in('status', ['cancelled', 'failed']);
-          
-        if (reopenErr) {
-          console.error('[FORCE APPROVE BATCH REOPEN]', reopenErr.message);
-          return res.status(500).json({ message: `Failed to re-open batch transactions: ${reopenErr.message}` });
-        }
-      }
-
-      const errors = [];
-      let totalQty = 0;
-
-      for (const tx of pending) {
-        const { error: rpcErr } = await supabase.rpc('process_vote_transaction', {
-          p_tx_ref: tx.reference,
-          p_cat_id: tx.category_id,
-          p_con_id: tx.contestant_id,
-          p_usr_id: tx.user_id || null,
-          p_qty   : tx.quantity
+    // ── CRITICAL FIX FOR ISSUE #3: Row does not exist ──
+    if (!exactTx) {
+      console.log(`[FORCE APPROVE] Ref ${ref} not found. Attempting on-the-fly creation...`);
+      
+      // Validate that the admin passed the required voting details in the request body
+      if (!category_id || !contestant_id || !quantity) {
+        return res.status(404).json({ 
+          success: false,
+          message: 'Transaction row not found in database. To force-create and approve it, you must provide category_id, contestant_id, and quantity in your request body.' 
         });
-        if (rpcErr) {
-          errors.push(`${tx.reference}: ${rpcErr.message}`);
-        } else {
-          totalQty += tx.quantity;
-        }
       }
 
-      await supabase.from('audit_logs').insert({
-        user_id   : req.user?.id,
-        action    : 'FORCE_APPROVE_BATCH',
-        target    : ref,
-        ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
-      }).catch(() => {});
+      // Insert the missing transaction row as 'pending' first
+      const { data: newTx, error: createErr } = await supabase
+        .from('transactions')
+        .insert([{
+          reference: ref,
+          category_id,
+          contestant_id,
+          user_id: user_id || null,
+          quantity: parseInt(quantity, 10),
+          amount: amount || 0,
+          status: 'pending',
+          admin_override: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }])
+        .select().single();
 
-      if (errors.length > 0)
-        return res.status(207).json({ success: false, message: `Partial approval — ${errors.length} row(s) failed.`, errors });
+      if (createErr) {
+        console.error('[FORCE APPROVE CREATION FAILED]', createErr.message);
+        return res.status(500).json({ message: `Failed to create missing transaction row: ${createErr.message}` });
+      }
 
-      return res.json({
-        success  : true,
-        message  : `✓ ${totalQty} vote(s) credited for batch ${ref}.`,
-        quantity : totalQty,
-        reference: ref
-      });
+      exactTx = newTx; // Assign our newly created row to exactTx and carry on!
     }
 
-    return res.status(404).json({ message: 'Transaction not found.' });
+    // ── Step 2: Process the transaction (Existing or Newly Created) ──
+    if (exactTx.status === 'success')
+      return res.json({ success: true, message: 'Already recorded — votes are already credited.' });
+
+    // Re-open cancelled/failed TX to 'pending' so the RPC can catch it.
+    if (['cancelled', 'failed'].includes(exactTx.status)) {
+      const { error: reopenErr } = await supabase
+        .from('transactions')
+        .update({ 
+          status: 'pending', 
+          updated_at: new Date().toISOString(),
+          admin_override: true 
+        })
+        .eq('reference', ref);
+        
+      if (reopenErr) {
+        console.error('[FORCE APPROVE REOPEN]', reopenErr.message);
+        return res.status(500).json({ message: `Failed to re-open transaction: ${reopenErr.message}` });
+      }
+    }
+
+    // Process the database RPC function
+    const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
+      p_tx_ref: ref,
+      p_cat_id: exactTx.category_id,
+      p_con_id: exactTx.contestant_id,
+      p_usr_id: exactTx.user_id || null,
+      p_qty   : exactTx.quantity
+    });
+
+    if (rpcErr) {
+      console.error('[FORCE APPROVE RPC]', rpcErr.message);
+      return res.status(500).json({ message: `Vote processing failed: ${rpcErr.message}` });
+    }
+
+    if (!processed) {
+      return res.status(400).json({ message: 'Transaction already processed or could not be approved.' });
+    }
+
+    // Write to audit log
+    await supabase.from('audit_logs').insert({
+      user_id   : req.user?.id,
+      action    : 'FORCE_APPROVE_TRANSACTION',
+      target    : ref,
+      ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
+    }).catch(() => {});
+
+    return res.json({
+      success  : true,
+      message  : `✓ ${exactTx.quantity} vote(s) credited for ${ref}.`,
+      quantity : exactTx.quantity,
+      reference: ref
+    });
 
   } catch (err) {
     return res.status(500).json({ message: err.message });
   }
 };
-
 // ── DELETE /api/admin/transactions/:ref ──────────────────────
 exports.deleteTransaction = async (req, res) => {
   try {
