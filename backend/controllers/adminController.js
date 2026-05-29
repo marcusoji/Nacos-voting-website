@@ -197,21 +197,57 @@ exports.getTransactions = async (req, res) => {
 
 // ── POST /api/admin/transactions/:ref/force-approve ──────────
 // Admin manually credits votes after confirming payment was received.
-// Supports both single refs (VT-...) and batch refs (BT-...).
+// Handles VT- single refs, BT-xxx-uuid individual batch rows, and pure BT- batch refs.
 exports.forceApproveTransaction = async (req, res) => {
   try {
     const ref = String(req.params.ref || '').toUpperCase().trim();
     if (!ref) return res.status(400).json({ message: 'Reference required.' });
 
-    const isBatch = ref.startsWith('BT-');
+    // ── Step 1: always try exact reference match first ───────────
+    const { data: exactTx } = await supabase
+      .from('transactions').select('*').eq('reference', ref).maybeSingle();
 
-    // ── Batch reference: find all rows sharing this batch_reference ──
-    if (isBatch) {
+    if (exactTx) {
+      // Found a single row by exact reference — approve it directly
+      if (exactTx.status === 'success')
+        return res.json({ success: true, message: 'Already recorded — votes are already credited.' });
+
+      const { error: rpcErr } = await supabase.rpc('process_vote_transaction', {
+        p_tx_ref: ref,
+        p_cat_id: exactTx.category_id,
+        p_con_id: exactTx.contestant_id,
+        p_usr_id: exactTx.user_id || null,
+        p_qty   : exactTx.quantity
+      });
+
+      if (rpcErr) {
+        console.error('[FORCE APPROVE RPC]', rpcErr.message);
+        return res.status(500).json({ message: `RPC error: ${rpcErr.message}` });
+      }
+
+      await supabase.from('audit_logs').insert({
+        user_id   : req.user?.id,
+        action    : 'FORCE_APPROVE_TRANSACTION',
+        target    : ref,
+        ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
+      }).catch(() => {});
+
+      console.log(`[FORCE APPROVE] ref:${ref} by admin:${req.user?.id} qty:${exactTx.quantity}`);
+      return res.json({
+        success  : true,
+        message  : `✓ ${exactTx.quantity} vote(s) credited for ${ref}.`,
+        quantity : exactTx.quantity,
+        reference: ref
+      });
+    }
+
+    // ── Step 2: no exact match — try batch_reference (pure BT- ref) ──
+    if (ref.startsWith('BT-')) {
       const { data: txRows, error: txErr } = await supabase
         .from('transactions').select('*').eq('batch_reference', ref);
 
       if (txErr || !txRows || txRows.length === 0)
-        return res.status(404).json({ message: 'Batch transaction not found.' });
+        return res.status(404).json({ message: 'Transaction not found. The reference may belong to a payment that was never saved to the database.' });
 
       const pending = txRows.filter(t => t.status !== 'success');
       if (pending.length === 0)
@@ -256,41 +292,9 @@ exports.forceApproveTransaction = async (req, res) => {
       });
     }
 
-    // ── Single reference (VT-...) ────────────────────────────────
-    const { data: tx, error: txErr } = await supabase
-      .from('transactions').select('*').eq('reference', ref).single();
+    // ── Step 3: nothing found at all ─────────────────────────────
+    return res.status(404).json({ message: 'Transaction not found. The reference may belong to a payment that was never saved to the database.' });
 
-    if (txErr || !tx) return res.status(404).json({ message: 'Transaction not found.' });
-    if (tx.status === 'success')
-      return res.json({ success: true, message: 'Already recorded — votes are already credited.' });
-
-    const { error: rpcErr } = await supabase.rpc('process_vote_transaction', {
-      p_tx_ref: ref,
-      p_cat_id: tx.category_id,
-      p_con_id: tx.contestant_id,
-      p_usr_id: tx.user_id || null,
-      p_qty   : tx.quantity
-    });
-
-    if (rpcErr) {
-      console.error('[FORCE APPROVE RPC]', rpcErr.message);
-      return res.status(500).json({ message: `RPC error: ${rpcErr.message}` });
-    }
-
-    await supabase.from('audit_logs').insert({
-      user_id   : req.user?.id,
-      action    : 'FORCE_APPROVE_TRANSACTION',
-      target    : ref,
-      ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
-    }).catch(() => {});
-
-    console.log(`[FORCE APPROVE] ref:${ref} by admin:${req.user?.id} qty:${tx.quantity}`);
-    res.json({
-      success  : true,
-      message  : `✓ ${tx.quantity} vote(s) credited for ${ref}.`,
-      quantity : tx.quantity,
-      reference: ref
-    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
