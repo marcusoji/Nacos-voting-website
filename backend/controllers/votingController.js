@@ -685,5 +685,5 @@ exports.cancelAllPending = asyncHandler(async (req, res) => {
   if (error) return res.status(500).json({ message: error.message });
 
   console.log('[CANCEL ALL] Cleared pending for user:', req.user.id);
-  res.json({ success: true, message: 'Pending transactions cleared. You can vote again.' });
+  res.json({ success: true, message: 'Pending transactions cleared. You can now vote again.' });
 });
