@@ -456,21 +456,24 @@ async function loadAllTransactions() {
   const canAct = tx => tx.status === 'pending' || tx.status === 'failed' || tx.status === 'cancelled';
   tbody.innerHTML = (r.data.data||[]).map(tx => `
     <tr>
-      <td style="font-family:monospace;font-size:.75rem;">${tx.reference}</td>
-      <td>${tx.contestants?.fullname||'—'}</td>
-      <td style="font-size:.8rem;">${tx.categories?.name||'—'}</td>
+      <td style="font-family:monospace;font-size:.75rem;">${escapeHtml(tx.reference)}</td>
+      <td>${escapeHtml(tx.contestants?.fullname||'—')}</td>
+      <td style="font-size:.8rem;">${escapeHtml(tx.categories?.name||'—')}</td>
       <td>₦${(tx.amount||0).toLocaleString()}</td>
       <td>${tx.quantity}</td>
       <td>
         <span class="badge badge-${tx.status}">${tx.status}</span>
         ${canAct(tx) ? `<div style="display:flex;gap:.3rem;margin-top:.35rem;flex-wrap:wrap;">
           <button class="btn btn-gold btn-sm" style="padding:.2rem .5rem;font-size:.7rem;"
-            data-ref="${tx.reference}"
-            data-name="${(tx.contestants?.fullname||'this contestant').replace(/"/g,'&quot;')}"
+            data-ref="${escapeHtml(tx.reference)}"
+            data-name="${escapeHtml((tx.contestants?.fullname||'this contestant')).replace(/"/g,'&quot;')}"
             data-qty="${tx.quantity}"
+            data-category-id="${tx.category_id || ''}"
+            data-contestant-id="${tx.contestant_id || ''}"
+            data-user-id="${tx.user_id || ''}"
             onclick="forceApprove(this)">✓ Approve</button>
           <button style="padding:.2rem .5rem;font-size:.7rem;cursor:pointer;border-radius:4px;border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.1);color:#ef4444;"
-            data-ref="${tx.reference}"
+            data-ref="${escapeHtml(tx.reference)}"
             onclick="deleteTx(this)">🗑 Delete</button>
         </div>` : ''}
       </td>
@@ -478,6 +481,16 @@ async function loadAllTransactions() {
     </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">No transactions</td></tr>';
 }
 
+// Add escape helper function at the top of your script
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/[&<>]/g, function(m) {
+    if (m === '&') return '&amp;';
+    if (m === '<') return '&lt;';
+    if (m === '>') return '&gt;';
+    return m;
+  });
+}
 // ── Init ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadAnalytics();
@@ -487,16 +500,39 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+<!-- Replace the forceApprove function in admin-dashboard.html with this: -->
+
 async function forceApprove(btn) {
   const ref  = btn.dataset.ref;
   const name = btn.dataset.name;
   const qty  = btn.dataset.qty;
+  const catId = btn.dataset.categoryId;
+  const conId = btn.dataset.contestantId;
+  
   if (!confirm('Force-approve ' + qty + ' vote(s) for "' + name + '"?\n\nOnly do this AFTER confirming payment was actually received.\n\nRef: ' + ref)) return;
+  
   btn.disabled = true;
   const orig = btn.textContent;
   btn.textContent = '…';
   try {
-    const r = await apiFetch('/admin/transactions/' + ref + '/force-approve', { method: 'POST' });
+    // Build request body with all necessary fields for missing transaction creation
+    const requestBody = {
+      category_id: catId,
+      contestant_id: conId,
+      quantity: parseInt(qty, 10),
+      amount: parseInt(qty, 10) * 50  // ₦50 per vote
+    };
+    
+    // Add user_id if available from the transaction row
+    if (btn.dataset.userId) {
+      requestBody.user_id = btn.dataset.userId;
+    }
+    
+    const r = await apiFetch('/admin/transactions/' + ref + '/force-approve', { 
+      method: 'POST',
+      body: JSON.stringify(requestBody)
+    });
+    
     if (r.ok && r.data.success) {
       Toast.success('Approved!', r.data.message);
       setTimeout(loadAllTransactions, 800);
@@ -504,8 +540,8 @@ async function forceApprove(btn) {
       Toast.error('Failed', r.data.message || 'Could not approve.');
       btn.disabled = false; btn.textContent = orig;
     }
-  } catch {
-    Toast.error('Error', 'Network error.');
+  } catch (err) {
+    Toast.error('Error', err.message || 'Network error.');
     btn.disabled = false; btn.textContent = orig;
   }
 }
@@ -529,7 +565,6 @@ async function deleteTx(btn) {
     Toast.error('Error', 'Network error.');
     btn.disabled = false; btn.textContent = orig;
   }
-}
-</script>
+}</script>
 </body>
 </html>

@@ -193,6 +193,8 @@ exports.getTransactions = async (req, res) => {
 // ── POST /api/admin/transactions/:ref/force-approve ──────────
 // ── POST /api/admin/transactions/:ref/force-approve ──────────
 // Upgraded to dynamically create missing transactions on the fly
+// ── POST /api/admin/transactions/:ref/force-approve ──────────
+// Upgraded to dynamically create missing transactions on the fly
 exports.forceApproveTransaction = async (req, res) => {
   try {
     const ref = String(req.params.ref || '').toUpperCase().trim();
@@ -201,52 +203,92 @@ exports.forceApproveTransaction = async (req, res) => {
     // Grab extra payload fields from body in case we need to create a missing row
     const { category_id, contestant_id, quantity, amount, user_id } = req.body;
 
+    console.log('[FORCE APPROVE] Starting for ref:', ref, 'body:', req.body);
+
     // ── Step 1: Try exact reference match ───────────
     let { data: exactTx } = await supabase
       .from('transactions').select('*').eq('reference', ref).maybeSingle();
 
-    // ── CRITICAL FIX FOR ISSUE #3: Row does not exist ──
+    // ── CRITICAL FIX: Row does not exist ──
     if (!exactTx) {
       console.log(`[FORCE APPROVE] Ref ${ref} not found. Attempting on-the-fly creation...`);
       
-      // Validate that the admin passed the required voting details in the request body
+      // Validate that the admin passed the required voting details
       if (!category_id || !contestant_id || !quantity) {
-        return res.status(404).json({ 
+        return res.status(400).json({ 
           success: false,
-          message: 'Transaction row not found in database. To force-create and approve it, you must provide category_id, contestant_id, and quantity in your request body.' 
+          message: 'Transaction row not found. To force-create, provide: category_id, contestant_id, quantity in request body.' 
         });
       }
+
+      // Get contestant info to verify existence
+      const { data: contestant, error: conErr } = await supabase
+        .from('contestants')
+        .select('id, category_id')
+        .eq('id', contestant_id)
+        .single();
+        
+      if (conErr || !contestant) {
+        return res.status(404).json({
+          success: false,
+          message: `Contestant ${contestant_id} not found.`
+        });
+      }
+
+      const qtyNum = parseInt(quantity, 10);
+      if (isNaN(qtyNum) || qtyNum < 1 || qtyNum > 1000) {
+        return res.status(400).json({
+          success: false,
+          message: 'Quantity must be between 1 and 1000.'
+        });
+      }
+
+      const amountNum = amount || (qtyNum * 50); // ₦50 per vote default
 
       // Insert the missing transaction row as 'pending' first
       const { data: newTx, error: createErr } = await supabase
         .from('transactions')
         .insert([{
           reference: ref,
-          category_id,
-          contestant_id,
+          category_id: category_id,
+          contestant_id: contestant_id,
           user_id: user_id || null,
-          quantity: parseInt(quantity, 10),
-          amount: amount || 0,
+          quantity: qtyNum,
+          amount: amountNum,
           status: 'pending',
           admin_override: true,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          metadata: {
+            admin_created: true,
+            created_by: req.user?.id,
+            original_ref: ref
+          }
         }])
-        .select().single();
+        .select()
+        .single();
 
       if (createErr) {
         console.error('[FORCE APPROVE CREATION FAILED]', createErr.message);
-        return res.status(500).json({ message: `Failed to create missing transaction row: ${createErr.message}` });
+        return res.status(500).json({ 
+          success: false,
+          message: `Failed to create missing transaction row: ${createErr.message}` 
+        });
       }
 
-      exactTx = newTx; // Assign our newly created row to exactTx and carry on!
+      exactTx = newTx;
+      console.log('[FORCE APPROVE] Created new transaction row:', exactTx.reference);
     }
 
-    // ── Step 2: Process the transaction (Existing or Newly Created) ──
-    if (exactTx.status === 'success')
-      return res.json({ success: true, message: 'Already recorded — votes are already credited.' });
+    // ── Step 2: Process the transaction ──
+    if (exactTx.status === 'success') {
+      return res.json({ 
+        success: true, 
+        message: 'Already recorded — votes are already credited.' 
+      });
+    }
 
-    // Re-open cancelled/failed TX to 'pending' so the RPC can catch it.
+    // Re-open cancelled/failed TX to 'pending' so the RPC can catch it
     if (['cancelled', 'failed'].includes(exactTx.status)) {
       const { error: reopenErr } = await supabase
         .from('transactions')
@@ -259,8 +301,12 @@ exports.forceApproveTransaction = async (req, res) => {
         
       if (reopenErr) {
         console.error('[FORCE APPROVE REOPEN]', reopenErr.message);
-        return res.status(500).json({ message: `Failed to re-open transaction: ${reopenErr.message}` });
+        return res.status(500).json({ 
+          success: false,
+          message: `Failed to re-open transaction: ${reopenErr.message}` 
+        });
       }
+      console.log('[FORCE APPROVE] Re-opened transaction:', ref);
     }
 
     // Process the database RPC function
@@ -274,11 +320,17 @@ exports.forceApproveTransaction = async (req, res) => {
 
     if (rpcErr) {
       console.error('[FORCE APPROVE RPC]', rpcErr.message);
-      return res.status(500).json({ message: `Vote processing failed: ${rpcErr.message}` });
+      return res.status(500).json({ 
+        success: false,
+        message: `Vote processing failed: ${rpcErr.message}` 
+      });
     }
 
     if (!processed) {
-      return res.status(400).json({ message: 'Transaction already processed or could not be approved.' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Transaction already processed or could not be approved.' 
+      });
     }
 
     // Write to audit log
@@ -297,7 +349,11 @@ exports.forceApproveTransaction = async (req, res) => {
     });
 
   } catch (err) {
-    return res.status(500).json({ message: err.message });
+    console.error('[FORCE APPROVE ERROR]', err);
+    return res.status(500).json({ 
+      success: false,
+      message: err.message 
+    });
   }
 };
 // ── DELETE /api/admin/transactions/:ref ──────────────────────
