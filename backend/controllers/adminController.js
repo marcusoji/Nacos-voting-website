@@ -226,13 +226,50 @@ exports.forceApproveTransaction = async (req, res) => {
         console.log(`[FORCE APPROVE] Re-opened ${exactTx.status} TX for processing: ${ref}`);
       }
 
-      const { error: rpcErr } = await supabase.rpc('process_vote_transaction', {
-        p_tx_ref: ref,
-        p_cat_id: exactTx.category_id,
-        p_con_id: exactTx.contestant_id,
-        p_usr_id: exactTx.user_id || null,
-        p_qty   : exactTx.quantity
-      });
+     // IMPORTANT:
+// Re-open cancelled/failed transaction before processing
+// because the SQL RPC only processes pending rows.
+if (['cancelled', 'failed'].includes(exactTx.status)) {
+  const { error: reopenErr } = await supabase
+    .from('transactions')
+    .update({
+      status: 'pending',
+      updated_at: new Date().toISOString(),
+      admin_override: true
+    })
+    .eq('reference', ref);
+
+  if (reopenErr) {
+    console.error('[FORCE APPROVE REOPEN]', reopenErr);
+
+    return res.status(500).json({
+      message: 'Could not reopen transaction.'
+    });
+  }
+}
+
+// NOW process the votes
+const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
+  p_tx_ref: ref,
+  p_cat_id: exactTx.category_id,
+  p_con_id: exactTx.contestant_id,
+  p_usr_id: exactTx.user_id || null,
+  p_qty   : exactTx.quantity
+});
+
+if (rpcErr) {
+  console.error('[FORCE APPROVE RPC]', rpcErr);
+
+  return res.status(500).json({
+    message: rpcErr.message || 'Vote processing failed.'
+  });
+}
+
+if (!processed) {
+  return res.status(400).json({
+    message: 'Transaction already processed or could not be approved.'
+  });
+}
 
       if (rpcErr) {
         console.error('[FORCE APPROVE RPC]', rpcErr.message);
