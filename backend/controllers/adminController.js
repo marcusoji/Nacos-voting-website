@@ -2,7 +2,7 @@ const { supabase } = require('../config/db');
 const multer = require('multer');
 const path   = require('path');
 
-const BUCKET = 'contestant-photos'; // ← BUG-01 FIX: was 'contestants'
+const BUCKET = 'contestant-photos'; 
 
 // Multer memory storage (files never touch disk — safe for serverless)
 const upload = multer({
@@ -25,7 +25,7 @@ exports.uploadImage = (req, res) => {
     const filename = `contestants/${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
 
     const { error: uploadErr } = await supabase.storage
-      .from(BUCKET)  // ← BUG-01 FIX
+      .from(BUCKET)  
       .upload(filename, req.file.buffer, {
         contentType: req.file.mimetype,
         upsert: true
@@ -36,7 +36,7 @@ exports.uploadImage = (req, res) => {
       return res.status(500).json({ message: 'Image upload failed: ' + uploadErr.message });
     }
 
-    const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(filename); // ← BUG-01 FIX
+    const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(filename); 
     return res.status(201).json({ url: urlData.publicUrl });
   });
 };
@@ -81,7 +81,6 @@ exports.createContestant = async (req, res) => {
     if (!category_id || !fullname || !avatar_url)
       return res.status(400).json({ message: 'category_id, fullname and avatar_url are required.' });
 
-    // Validate avatar_url is a Supabase Storage URL (basic check)
     if (!avatar_url.includes('supabase.co/storage')) {
       return res.status(400).json({ message: 'avatar_url must be a Supabase Storage URL.' });
     }
@@ -134,7 +133,6 @@ exports.getUsers = async (req, res) => {
 
 exports.deleteUser = async (req, res) => {
   try {
-    // Prevent self-deletion
     if (req.params.id === req.user?.id)
       return res.status(400).json({ message: 'You cannot delete your own account.' });
     const { error } = await supabase.auth.admin.deleteUser(req.params.id);
@@ -143,13 +141,11 @@ exports.deleteUser = async (req, res) => {
   } catch(err) { return res.status(500).json({ success: false, message: err.message }); }
 };
 
-// BUG-06 FIX: Removed broken single-admin guard; allow multiple admins
 exports.updateUserRole = async (req, res) => {
   try {
     const { role } = req.body;
     if (!['user','moderator','admin'].includes(role))
       return res.status(400).json({ message: 'Invalid role. Must be user, moderator, or admin.' });
-    // Prevent changing own role
     if (req.params.id === req.user?.id)
       return res.status(400).json({ message: 'You cannot change your own role.' });
     const { data, error } = await supabase.from('profiles')
@@ -194,31 +190,31 @@ exports.getTransactions = async (req, res) => {
   } catch(err) { return res.status(500).json({ success: false, message: err.message }); }
 };
 
-
 // ── POST /api/admin/transactions/:ref/force-approve ──────────
-// Admin manually credits votes after confirming payment was received.
-// Handles VT- single refs, BT-xxx-uuid individual batch rows, and pure BT- batch refs.
 exports.forceApproveTransaction = async (req, res) => {
   try {
     const ref = String(req.params.ref || '').toUpperCase().trim();
     if (!ref) return res.status(400).json({ message: 'Reference required.' });
 
-    // ── Step 1: always try exact reference match first ───────────
+    // ── Step 1: Exact Reference Match Match ───────────
     const { data: exactTx } = await supabase
       .from('transactions').select('*').eq('reference', ref).maybeSingle();
 
     if (exactTx) {
-      // Found a single row by exact reference — approve it directly
       if (exactTx.status === 'success')
         return res.json({ success: true, message: 'Already recorded — votes are already credited.' });
 
-      // Re-open cancelled/failed TX to 'pending' so the RPC (which checks status='pending') can process it.
-      if (exactTx.status !== 'pending') {
+      // Re-open cancelled/failed TX to 'pending' FIRST so the RPC can catch it.
+      if (['cancelled', 'failed'].includes(exactTx.status)) {
         const { error: reopenErr } = await supabase
           .from('transactions')
-          .update({ status: 'pending', updated_at: new Date().toISOString() })
-          .eq('reference', ref)
-          .in('status', ['cancelled', 'failed']);
+          .update({ 
+            status: 'pending', 
+            updated_at: new Date().toISOString(),
+            admin_override: true 
+          })
+          .eq('reference', ref);
+          
         if (reopenErr) {
           console.error('[FORCE APPROVE REOPEN]', reopenErr.message);
           return res.status(500).json({ message: `Failed to re-open transaction: ${reopenErr.message}` });
@@ -226,56 +222,25 @@ exports.forceApproveTransaction = async (req, res) => {
         console.log(`[FORCE APPROVE] Re-opened ${exactTx.status} TX for processing: ${ref}`);
       }
 
-     // IMPORTANT:
-// Re-open cancelled/failed transaction before processing
-// because the SQL RPC only processes pending rows.
-if (['cancelled', 'failed'].includes(exactTx.status)) {
-  const { error: reopenErr } = await supabase
-    .from('transactions')
-    .update({
-      status: 'pending',
-      updated_at: new Date().toISOString(),
-      admin_override: true
-    })
-    .eq('reference', ref);
-
-  if (reopenErr) {
-    console.error('[FORCE APPROVE REOPEN]', reopenErr);
-
-    return res.status(500).json({
-      message: 'Could not reopen transaction.'
-    });
-  }
-}
-
-// NOW process the votes
-const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
-  p_tx_ref: ref,
-  p_cat_id: exactTx.category_id,
-  p_con_id: exactTx.contestant_id,
-  p_usr_id: exactTx.user_id || null,
-  p_qty   : exactTx.quantity
-});
-
-if (rpcErr) {
-  console.error('[FORCE APPROVE RPC]', rpcErr);
-
-  return res.status(500).json({
-    message: rpcErr.message || 'Vote processing failed.'
-  });
-}
-
-if (!processed) {
-  return res.status(400).json({
-    message: 'Transaction already processed or could not be approved.'
-  });
-}
+      // NOW process the database RPC function safely
+      const { data: processed, error: rpcErr } = await supabase.rpc('process_vote_transaction', {
+        p_tx_ref: ref,
+        p_cat_id: exactTx.category_id,
+        p_con_id: exactTx.contestant_id,
+        p_usr_id: exactTx.user_id || null,
+        p_qty   : exactTx.quantity
+      });
 
       if (rpcErr) {
         console.error('[FORCE APPROVE RPC]', rpcErr.message);
-        return res.status(500).json({ message: `RPC error: ${rpcErr.message}` });
+        return res.status(500).json({ message: `Vote processing failed: ${rpcErr.message}` });
       }
 
+      if (!processed) {
+        return res.status(400).json({ message: 'Transaction already processed or could not be approved.' });
+      }
+
+      // Write to log history
       await supabase.from('audit_logs').insert({
         user_id   : req.user?.id,
         action    : 'FORCE_APPROVE_TRANSACTION',
@@ -283,7 +248,6 @@ if (!processed) {
         ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
       }).catch(() => {});
 
-      console.log(`[FORCE APPROVE] ref:${ref} by admin:${req.user?.id} qty:${exactTx.quantity}`);
       return res.json({
         success  : true,
         message  : `✓ ${exactTx.quantity} vote(s) credited for ${ref}.`,
@@ -292,31 +256,30 @@ if (!processed) {
       });
     }
 
-    // ── Step 2: no exact match — try batch_reference (pure BT- ref) ──
+    // ── Step 2: Batch reference (Pure BT- ref) ──
     if (ref.startsWith('BT-')) {
       const { data: txRows, error: txErr } = await supabase
         .from('transactions').select('*').eq('batch_reference', ref);
 
       if (txErr || !txRows || txRows.length === 0)
-        return res.status(404).json({ message: 'Transaction not found. The reference may belong to a payment that was never saved to the database.' });
+        return res.status(404).json({ message: 'Transaction not found.' });
 
       const pending = txRows.filter(t => t.status !== 'success');
       if (pending.length === 0)
         return res.json({ success: true, message: 'Already recorded — all votes in this batch are already credited.' });
 
-      // Re-open any cancelled/failed rows to 'pending' so the RPC can process them.
       const nonPending = pending.filter(t => t.status !== 'pending');
       if (nonPending.length > 0) {
         const { error: reopenErr } = await supabase
           .from('transactions')
-          .update({ status: 'pending', updated_at: new Date().toISOString() })
+          .update({ status: 'pending', updated_at: new Date().toISOString(), admin_override: true })
           .eq('batch_reference', ref)
           .in('status', ['cancelled', 'failed']);
+          
         if (reopenErr) {
           console.error('[FORCE APPROVE BATCH REOPEN]', reopenErr.message);
           return res.status(500).json({ message: `Failed to re-open batch transactions: ${reopenErr.message}` });
         }
-        console.log(`[FORCE APPROVE BATCH] Re-opened ${nonPending.length} non-pending rows for: ${ref}`);
       }
 
       const errors = [];
@@ -331,7 +294,6 @@ if (!processed) {
           p_qty   : tx.quantity
         });
         if (rpcErr) {
-          console.error('[FORCE APPROVE BATCH RPC]', tx.reference, rpcErr.message);
           errors.push(`${tx.reference}: ${rpcErr.message}`);
         } else {
           totalQty += tx.quantity;
@@ -345,8 +307,6 @@ if (!processed) {
         ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
       }).catch(() => {});
 
-      console.log(`[FORCE APPROVE BATCH] ref:${ref} by admin:${req.user?.id} qty:${totalQty} errors:${errors.length}`);
-
       if (errors.length > 0)
         return res.status(207).json({ success: false, message: `Partial approval — ${errors.length} row(s) failed.`, errors });
 
@@ -358,24 +318,21 @@ if (!processed) {
       });
     }
 
-    // ── Step 3: nothing found at all ─────────────────────────────
-    return res.status(404).json({ message: 'Transaction not found. The reference may belong to a payment that was never saved to the database.' });
+    return res.status(404).json({ message: 'Transaction not found.' });
 
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({ message: err.message });
   }
 };
 
 // ── DELETE /api/admin/transactions/:ref ──────────────────────
-// Admin deletes a transaction record (cancelled, failed, or erroneous ones).
-// Does NOT reverse votes if already credited — use with caution.
 exports.deleteTransaction = async (req, res) => {
   try {
     const ref = String(req.params.ref || '').toUpperCase().trim();
     if (!ref) return res.status(400).json({ message: 'Reference required.' });
 
     const { data: tx } = await supabase
-      .from('transactions').select('status').eq('reference', ref).single();
+      .from('transactions').select('status').eq('reference', ref).maybeSingle();
 
     if (!tx) return res.status(404).json({ message: 'Transaction not found.' });
 
@@ -397,9 +354,8 @@ exports.deleteTransaction = async (req, res) => {
       ip_address: req.headers['x-forwarded-for']?.split(',')[0] || req.ip
     }).catch(() => {});
 
-    console.log(`[DELETE TX] ref:${ref} deleted by admin:${req.user?.id}`);
-    res.json({ success: true, message: `Transaction ${ref} deleted.` });
+    return res.json({ success: true, message: `Transaction ${ref} deleted.` });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({ message: err.message });
   }
 };
