@@ -212,6 +212,20 @@ exports.forceApproveTransaction = async (req, res) => {
       if (exactTx.status === 'success')
         return res.json({ success: true, message: 'Already recorded — votes are already credited.' });
 
+      // Re-open cancelled/failed TX to 'pending' so the RPC (which checks status='pending') can process it.
+      if (exactTx.status !== 'pending') {
+        const { error: reopenErr } = await supabase
+          .from('transactions')
+          .update({ status: 'pending', updated_at: new Date().toISOString() })
+          .eq('reference', ref)
+          .in('status', ['cancelled', 'failed']);
+        if (reopenErr) {
+          console.error('[FORCE APPROVE REOPEN]', reopenErr.message);
+          return res.status(500).json({ message: `Failed to re-open transaction: ${reopenErr.message}` });
+        }
+        console.log(`[FORCE APPROVE] Re-opened ${exactTx.status} TX for processing: ${ref}`);
+      }
+
       const { error: rpcErr } = await supabase.rpc('process_vote_transaction', {
         p_tx_ref: ref,
         p_cat_id: exactTx.category_id,
@@ -252,6 +266,21 @@ exports.forceApproveTransaction = async (req, res) => {
       const pending = txRows.filter(t => t.status !== 'success');
       if (pending.length === 0)
         return res.json({ success: true, message: 'Already recorded — all votes in this batch are already credited.' });
+
+      // Re-open any cancelled/failed rows to 'pending' so the RPC can process them.
+      const nonPending = pending.filter(t => t.status !== 'pending');
+      if (nonPending.length > 0) {
+        const { error: reopenErr } = await supabase
+          .from('transactions')
+          .update({ status: 'pending', updated_at: new Date().toISOString() })
+          .eq('batch_reference', ref)
+          .in('status', ['cancelled', 'failed']);
+        if (reopenErr) {
+          console.error('[FORCE APPROVE BATCH REOPEN]', reopenErr.message);
+          return res.status(500).json({ message: `Failed to re-open batch transactions: ${reopenErr.message}` });
+        }
+        console.log(`[FORCE APPROVE BATCH] Re-opened ${nonPending.length} non-pending rows for: ${ref}`);
+      }
 
       const errors = [];
       let totalQty = 0;
