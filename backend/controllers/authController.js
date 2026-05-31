@@ -99,6 +99,7 @@ exports.login = async (req, res) => {
     return res.status(200).json({
       message: 'Login successful.',
       access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
       user: {
         id: data.user.id,
         email: data.user.email,
@@ -121,6 +122,25 @@ exports.login = async (req, res) => {
 };
 // ── POST /api/auth/logout ────────────────────────────────────
 exports.logout = (_req, res) => res.status(200).json({ message: 'Logged out.' });
+
+// POST /api/auth/refresh — exchange a refresh_token for a new access_token
+exports.refresh = async (req, res) => {
+  const { refresh_token } = req.body;
+  if (!refresh_token)
+    return res.status(400).json({ message: 'refresh_token is required.' });
+  try {
+    const { data, error } = await supabaseAuth.auth.refreshSession({ refresh_token });
+    if (error || !data?.session)
+      return res.status(401).json({ message: 'Refresh token invalid or expired. Please log in again.' });
+    return res.status(200).json({
+      access_token : data.session.access_token,
+      refresh_token: data.session.refresh_token
+    });
+  } catch (err) {
+    console.error('[REFRESH]', err.message);
+    return res.status(500).json({ message: 'Server error during token refresh.' });
+  }
+};
 
 // ── GET /api/auth/me ─────────────────────────────────────────
 exports.getMe = async (req, res) => {
