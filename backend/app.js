@@ -84,11 +84,16 @@ app.use((_req, res) => res.status(404).json({ message: 'Route not found.' }));
 
 // Global error handler
 app.use((err, _req, res, _next) => {
-  const status  = err.status || 500;
-  const message = (process.env.NODE_ENV === 'production' && status === 500)
-    ? 'Internal server error.'
-    : (err.message || 'Internal server error.');
-  console.error(`[ERROR ${status}]`, err.message);
+  // Axios errors from upstream services (e.g. Paystack) should never
+  // leak their HTTP status to the client — always map them to 502.
+  const isAxiosError = !!(err.response && err.config);
+  const status  = isAxiosError ? 502 : (err.status || err.statusCode || 500);
+  const message = isAxiosError
+    ? 'Payment gateway error. Please try again.'
+    : ((process.env.NODE_ENV === 'production' && status === 500)
+        ? 'Internal server error.'
+        : (err.message || 'Internal server error.'));
+  console.error(`[ERROR ${status}]`, err.message, isAxiosError ? `(upstream ${err.response?.status})` : '');
   res.status(status).json({ message });
 });
 
