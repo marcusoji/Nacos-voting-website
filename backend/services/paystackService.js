@@ -45,7 +45,7 @@ module.exports = {
 
     const payload = {
       email,
-      amount      : Number(amountInKobo), // Type-safe cast
+      amount      : Number(amountInKobo),
       reference,
       currency    : 'NGN',
       metadata,
@@ -59,8 +59,18 @@ module.exports = {
       email
     });
 
-    const response = await client.post('/transaction/initialize', payload);
-    return response.data;
+    try {
+      const response = await client.post('/transaction/initialize', payload);
+      return response.data;
+    } catch (err) {
+      const upstreamStatus = err.response?.status;
+      const upstreamMsg    = err.response?.data?.message || err.message;
+      console.error('[PAYSTACK INIT ERROR]', upstreamStatus, upstreamMsg);
+      if (upstreamStatus === 401) {
+        throw Object.assign(new Error('Payment gateway authentication failed. Please contact support.'), { status: 502 });
+      }
+      throw Object.assign(new Error('Payment gateway error. Please try again.'), { status: 502 });
+    }
   },
 
   async verifyTx(reference, expectedAmountInKobo) {
