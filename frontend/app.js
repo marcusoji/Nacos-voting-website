@@ -35,8 +35,8 @@ const STAFF_PAGES = new Set(['moderator-dashboard.html']);
   if (page === 'checkout.html' && !user)                                      { location.replace('login.html'); return; }
 })();
 
-// ── Fetch helper — always sends Bearer token ──────────────────
-window.apiFetch = async (path, opts = {}) => {
+// ── Fetch helper — always sends Bearer token, auto-refreshes on 401 ──
+window.apiFetch = async (path, opts = {}, _retried = false) => {
   try {
     const token = localStorage.getItem('nacos_token');
     const res = await fetch(`${window.API}${path}`, {
@@ -46,16 +46,23 @@ window.apiFetch = async (path, opts = {}) => {
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         ...(opts.headers || {})
       }
-      // NOTE: no 'credentials' needed — we use Bearer token, not cookies
     });
     const data = await res.json().catch(() => ({}));
+
+    // Auto-refresh on 401 (expired token), retry once
+    if (res.status === 401 && !_retried) {
+      const refreshed = await window.Auth.tryRefresh();
+      if (refreshed) return window.apiFetch(path, opts, true);
+      // Refresh failed — clear session and redirect to login
+      window.Auth.clear();
+      const page = location.pathname.split('/').pop() || 'index.html';
+      if (!PUBLIC_PAGES.has(page)) location.replace('login.html');
+      return { ok: false, status: 401, data };
+    }
+
     if (!res.ok) {
-  console.error('[API ERROR]', {
-    path,
-    status: res.status,
-    data
-  });
-}
+      console.error('[API ERROR]', { path, status: res.status, data });
+    }
     return { ok: res.ok, status: res.status, data };
   } catch (err) {
     console.error('[apiFetch] Network error on', path, err.message);
@@ -102,16 +109,36 @@ window.Toast = {
 
 // ── Auth ──────────────────────────────────────────────────────
 window.Auth = {
-  _userKey : 'nacos_user',
-  _tokenKey: 'nacos_token',
+  _userKey   : 'nacos_user',
+  _tokenKey  : 'nacos_token',
+  _refreshKey: 'nacos_refresh',
 
-  getUser()    { try { return JSON.parse(localStorage.getItem(this._userKey)); } catch { return null; } },
-  getToken()   { return localStorage.getItem(this._tokenKey) || null; },
-  setUser(u)   { localStorage.setItem(this._userKey, JSON.stringify(u)); },
-  setToken(t)  { if (t) localStorage.setItem(this._tokenKey, t); },
-  clear()      { localStorage.removeItem(this._userKey); localStorage.removeItem(this._tokenKey); },
-  isLoggedIn() { return !!(this.getUser() && this.getToken()); },
-  role()       { return this.getUser()?.role || 'user'; },
+  getUser()         { try { return JSON.parse(localStorage.getItem(this._userKey)); } catch { return null; } },
+  getToken()        { return localStorage.getItem(this._tokenKey) || null; },
+  getRefreshToken() { return localStorage.getItem(this._refreshKey) || null; },
+  setUser(u)        { localStorage.setItem(this._userKey, JSON.stringify(u)); },
+  setToken(t)       { if (t) localStorage.setItem(this._tokenKey, t); },
+  setRefreshToken(t){ if (t) localStorage.setItem(this._refreshKey, t); },
+  clear()           { localStorage.removeItem(this._userKey); localStorage.removeItem(this._tokenKey); localStorage.removeItem(this._refreshKey); },
+  isLoggedIn()      { return !!(this.getUser() && this.getToken()); },
+  role()            { return this.getUser()?.role || 'user'; },
+
+  async tryRefresh() {
+    const refreshToken = this.getRefreshToken();
+    if (!refreshToken) return false;
+    try {
+      const res = await fetch(`${window.API}/auth/refresh`, {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ refresh_token: refreshToken })
+      });
+      if (!res.ok) return false;
+      const d = await res.json();
+      if (d.access_token)  this.setToken(d.access_token);
+      if (d.refresh_token) this.setRefreshToken(d.refresh_token);
+      return true;
+    } catch { return false; }
+  },
 
   async checkSession() {
     const token = this.getToken();
