@@ -113,9 +113,8 @@ async function handleLogin(e) {
     if (r.ok) {
 
       Auth.setUser(r.data.user);
-
-      if (r.data.access_token)
-        Auth.setToken(r.data.access_token);
+      if (r.data.access_token)  Auth.setToken(r.data.access_token);
+      if (r.data.refresh_token) Auth.setRefreshToken(r.data.refresh_token);
 
       Toast.success(
         'Welcome back!',
