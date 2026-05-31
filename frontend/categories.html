@@ -82,7 +82,8 @@ const CATS = [
   { slug:'best-dressed',                name:'Best\nDressed',                          gender:true,  male:'best-dressed-male.html',               female:'best-dressed-female.html' },
   { slug:'best-coordinator',            name:'Best\nCoordinator',                      gender:true,  male:'best-coordinator-male.html',           female:'best-coordinator-female.html' },
   { slug:'best-executive',              name:'Best\nExecutive',                        gender:false, page:'best-executive.html' },
-  { slug:'sportsman',                   name:'Sportsman\nof the Year',                 gender:false, page:'sportsman.html' }
+  { slug:'sportsman',                   name:'Sportsman\nof the Year',                 gender:false, page:'sportsman.html' },
+  { slug:'vanguard-leadership',         name:'Vanguard\nLeadership Award',             gender:false, page:'vanguard-leadership.html' }
 ];
 
 const CAT_ICONS = {
@@ -94,7 +95,8 @@ const CAT_ICONS = {
   'best-dressed'               : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>`,
   'best-coordinator'           : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
   'best-executive'             : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>`,
-  'sportsman'                  : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg>`
+  'sportsman'                  : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg>`,
+  'vanguard-leadership'        : `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`
 };
 
 let _pendingSlug = null;
