@@ -6,7 +6,7 @@ const { paymentLimiter }  = require('../middleware/rateLimiter');
 
 router.get('/categories',         vc.getCategories);
 router.get('/categories/:slug',   vc.getCategoryBySlug);
-router.get('/leaderboard',        vc.getLeaderboard);
+router.get('/leaderboard',        optionalSession, vc.getLeaderboard);
 
 // SINGLE PAYMENT
 router.post('/initialize',        optionalSession, paymentLimiter, vc.initializePayment);

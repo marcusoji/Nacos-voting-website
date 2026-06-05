@@ -437,3 +437,117 @@ exports.deleteTransaction = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
+
+// ── LEADERBOARD FREEZE CONTROLS ──────────────────────────────
+
+// Helper: fetch live leaderboard data (same logic as votingController)
+async function _fetchLiveSnapshot(supabase) {
+  const { data: categories, error } = await supabase.from('categories').select('*').order('name');
+  if (error) throw error;
+  return Promise.all(categories.map(async (cat) => {
+    const { data: contestants } = await supabase
+      .from('contestants')
+      .select('id, fullname, avatar_url, vote_count')
+      .eq('category_id', cat.id)
+      .order('vote_count', { ascending: false })
+      .limit(10);
+    const all = contestants || [];
+    return { category: cat, podium: all.slice(0, 3), rest: all.slice(3) };
+  }));
+}
+
+// GET /api/admin/leaderboard/settings
+exports.getLeaderboardSettings = async (req, res) => {
+  try {
+    const { data: settingRow } = await supabase
+      .from('app_settings').select('value, updated_at').eq('key', 'leaderboard_mode').single();
+    const { data: snapRow } = await supabase
+      .from('leaderboard_snapshot').select('captured_at').order('captured_at', { ascending: false }).limit(1).single();
+    return res.json({
+      success: true,
+      settings: settingRow?.value || { frozen: false, reveal_final: false },
+      last_updated: settingRow?.updated_at,
+      snapshot_captured_at: snapRow?.captured_at || null
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /api/admin/leaderboard/freeze
+// Captures a fresh snapshot of current standings, then enables frozen mode
+exports.freezeLeaderboard = async (req, res) => {
+  try {
+    // 1. Capture live snapshot now
+    const snapshotData = await _fetchLiveSnapshot(supabase);
+
+    // 2. Store snapshot
+    await supabase.from('leaderboard_snapshot').insert({
+      data: snapshotData,
+      captured_by: req.user.id
+    });
+
+    // 3. Update setting: frozen=true, reveal_final=false
+    await supabase.from('app_settings').upsert({
+      key: 'leaderboard_mode',
+      value: { frozen: true, reveal_final: false },
+      updated_at: new Date().toISOString(),
+      updated_by: req.user.id
+    }, { onConflict: 'key' });
+
+    return res.json({ success: true, message: 'Leaderboard frozen. Public now sees the captured snapshot.' });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /api/admin/leaderboard/unfreeze
+// Removes freeze — public sees live again (without revealing final standings)
+exports.unfreezeLeaderboard = async (req, res) => {
+  try {
+    await supabase.from('app_settings').upsert({
+      key: 'leaderboard_mode',
+      value: { frozen: false, reveal_final: false },
+      updated_at: new Date().toISOString(),
+      updated_by: req.user.id
+    }, { onConflict: 'key' });
+
+    return res.json({ success: true, message: 'Leaderboard unfrozen. Public sees live standings.' });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /api/admin/leaderboard/reveal-final
+// Voting is over — reveal final (live) standings to everyone
+exports.revealFinalStandings = async (req, res) => {
+  try {
+    await supabase.from('app_settings').upsert({
+      key: 'leaderboard_mode',
+      value: { frozen: false, reveal_final: true },
+      updated_at: new Date().toISOString(),
+      updated_by: req.user.id
+    }, { onConflict: 'key' });
+
+    return res.json({ success: true, message: 'Final standings revealed to all users.' });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /api/admin/leaderboard/hide-final
+// Pull back reveal (re-freeze)
+exports.hideFinalStandings = async (req, res) => {
+  try {
+    await supabase.from('app_settings').upsert({
+      key: 'leaderboard_mode',
+      value: { frozen: true, reveal_final: false },
+      updated_at: new Date().toISOString(),
+      updated_by: req.user.id
+    }, { onConflict: 'key' });
+
+    return res.json({ success: true, message: 'Final standings hidden again. Public sees frozen snapshot.' });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+};

@@ -17,6 +17,9 @@
       <button class="dash-nav-item" onclick="showPanel('users')" id="nav-users">
         <span class="nav-icon">👥</span> Users
       </button>
+      <button class="dash-nav-item" onclick="showPanel('leaderboard')" id="nav-leaderboard">
+        <span class="nav-icon">🏆</span> Leaderboard
+      </button>
       <div class="divider" style="margin:1rem 0;"></div>
       <button class="dash-nav-item" onclick="Auth.logout()">
         <span class="nav-icon">🚪</span> Logout
@@ -91,6 +94,27 @@
           </div>
         </div>
       </div>
+      <div id="panel-leaderboard" style="display:none;">
+        <div class="dash-panel">
+          <div class="dash-panel-title">🏆 Leaderboard Status</div>
+
+          <div id="mod-lb-status" style="background:rgba(201,161,74,.08);border:1px solid rgba(201,161,74,.25);border-radius:10px;padding:1.2rem 1.4rem;margin-bottom:1.5rem;">
+            <div style="font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#5e7060);margin-bottom:.5rem;">Public Leaderboard Status</div>
+            <div id="mod-lb-status-text" style="font-size:1rem;font-weight:600;color:var(--text,#f0f4f1);">Loading…</div>
+            <div id="mod-lb-snap-time" style="font-size:.78rem;color:var(--text-muted,#5e7060);margin-top:.3rem;"></div>
+          </div>
+
+          <div style="background:rgba(59,195,112,.07);border:1px solid rgba(59,195,112,.2);border-radius:10px;padding:1rem 1.2rem;margin-bottom:1.2rem;font-size:.85rem;color:var(--text-muted,#5e7060);">
+            ℹ️ As a moderator, you always see <strong style="color:#3bc370;">live standings</strong> on the leaderboard page, regardless of what the public sees. Only admins can change the freeze/reveal settings.
+          </div>
+
+          <div style="text-align:center;">
+            <a href="leaderboard.html" target="_blank" style="color:#C9A14A;font-size:.9rem;text-decoration:none;">
+              🔗 Open Live Leaderboard →
+            </a>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 </div>
@@ -104,9 +128,12 @@ document.getElementById('mod-user-name').textContent = `Welcome, ${modUser?.full
 function showPanel(name) {
   document.getElementById('panel-contestants').style.display = name === 'contestants' ? '' : 'none';
   document.getElementById('panel-users').style.display = name === 'users' ? '' : 'none';
+  document.getElementById('panel-leaderboard').style.display = name === 'leaderboard' ? '' : 'none';
   document.getElementById('nav-contestants').classList.toggle('active', name === 'contestants');
   document.getElementById('nav-users').classList.toggle('active', name === 'users');
+  document.getElementById('nav-leaderboard')?.classList.toggle('active', name === 'leaderboard');
   if (name === 'users') loadModUsers();
+  if (name === 'leaderboard') loadModLbStatus();
 }
 
 let modFile = null;
@@ -224,6 +251,35 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   loadModContestants();
 });
+
+async function loadModLbStatus() {
+  const statusText = document.getElementById('mod-lb-status-text');
+  const snapTime   = document.getElementById('mod-lb-snap-time');
+  try {
+    const r = await apiFetch('/admin/leaderboard/settings');
+    if (!r.ok) throw new Error();
+    const { settings, snapshot_captured_at } = r.data;
+
+    let label = '';
+    if (settings.reveal_final) {
+      label = '🎉 Final standings REVEALED to everyone';
+    } else if (settings.frozen) {
+      label = '⏸️ FROZEN — public sees snapshot, you see live';
+    } else {
+      label = '▶️ LIVE — everyone sees real-time standings';
+    }
+    statusText.textContent = label;
+
+    if (snapshot_captured_at) {
+      const d = new Date(snapshot_captured_at).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+      snapTime.textContent = `Last snapshot taken: ${d}`;
+    } else {
+      snapTime.textContent = 'No snapshot taken yet.';
+    }
+  } catch {
+    statusText.textContent = 'Could not load status.';
+  }
+}
 </script>
 </body>
 </html>

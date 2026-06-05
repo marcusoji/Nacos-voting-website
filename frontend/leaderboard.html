@@ -16,8 +16,11 @@
       <h1 style="font-family:'Playfair Display',serif;font-size:clamp(1.5rem,4vw,2.2rem);font-weight:700;color:var(--text,#f0f4f1);margin-bottom:.3rem;">
         Live <span style="color:#C9A14A;">Standings</span>
       </h1>
-      <p style="color:var(--text-muted,#5e7060);font-size:.85rem;">Real-time rankings &mdash; updated after every payment</p>
+      <p style="color:var(--text-muted,#5e7060);font-size:.85rem;">NACOS Awards 2026</p>
     </div>
+
+    <!-- Status banner — injected by JS -->
+    <div id="lb-status-banner" style="display:none;margin-bottom:1.5rem;"></div>
   </div>
 
   <div id="lb-container">
@@ -29,7 +32,40 @@
 
 </div>
 
-<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+<style>
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Status banners ── */
+.lb-banner {
+  border-radius: 10px;
+  padding: .85rem 1.2rem;
+  font-size: .85rem;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  line-height: 1.45;
+}
+.lb-banner-frozen {
+  background: rgba(201,161,74,.12);
+  border: 1px solid rgba(201,161,74,.35);
+  color: #d4ad5a;
+}
+.lb-banner-live-admin {
+  background: rgba(59,195,112,.1);
+  border: 1px solid rgba(59,195,112,.35);
+  color: #3bc370;
+}
+.lb-banner-revealed {
+  background: rgba(100,149,237,.12);
+  border: 1px solid rgba(100,149,237,.35);
+  color: #7eaaff;
+}
+.lb-banner-icon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+</style>
+
 <script src="app.js"></script>
 <script>
 const CAT_ICONS = {
@@ -44,45 +80,31 @@ function initial(name) {
   return `<div class="lb-podium-initial">${(name||'?').charAt(0).toUpperCase()}</div>`;
 }
 
-function imgOrInitial(con, cls='') {
-  if (con.avatar_url) {
-    return `<img class="${cls}" src="${con.avatar_url}" alt="${con.fullname}"
-              onerror="this.outerHTML='${initial(con.fullname).replace(/'/g,"\\'")}'" >`;
-  }
-  return initial(con.fullname);
-}
-
-
-function listRow(con, rank, maxVotes) {
-  const pct = maxVotes ? Math.round((con.vote_count||0)/maxVotes*100) : 0;
+function listRow(con, rank, maxVotes, showVotes) {
+  const pct = showVotes ? (maxVotes ? Math.round((con.vote_count||0)/maxVotes*100) : 0) : 0;
+  const voteDisplay = showVotes ? (con.vote_count||0).toLocaleString() : '—';
   const ava = con.avatar_url
     ? `<img src="${con.avatar_url}" alt="" style="width:100%;height:100%;object-fit:cover;"
-           onerror="this.outerHTML='<span style=\'font-family:Playfair Display,serif;font-size:.9rem;color:#C9A14A;font-weight:700;\'>${con.fullname.charAt(0)}</span>'">`
+           onerror="this.outerHTML='<span style=\\'font-family:Playfair Display,serif;font-size:.9rem;color:#C9A14A;font-weight:700;\\'>${con.fullname.charAt(0)}</span>'">`
     : `<span style="font-family:'Playfair Display',serif;font-size:.9rem;color:#C9A14A;font-weight:700;">${con.fullname.charAt(0)}</span>`;
   return `
     <div class="lb-list-row">
       <div class="lb-list-pos">#${rank+1}</div>
       <div class="lb-list-ava">${ava}</div>
       <div class="lb-list-name">${con.fullname}</div>
-      <div class="lb-list-votes">${(con.vote_count||0).toLocaleString()}</div>
+      <div class="lb-list-votes">${voteDisplay}</div>
       <div class="lb-list-bar">
         <div class="lb-list-bar-fill" style="width:${pct}%"></div>
       </div>
     </div>`;
 }
 
-/* ============================================================
-   Replace the podiumCard() and renderBlock() functions
-   in your leaderboard HTML <script> block with these.
-   Everything else in the script stays the same.
-   ============================================================ */
-
-function podiumCard1st(con) {
+function podiumCard1st(con, showVotes) {
   const img = con.avatar_url
     ? `<img src="${con.avatar_url}" alt="${con.fullname}"
            onerror="this.outerHTML='<div class=\\'lb-podium-initial\\'>${con.fullname.charAt(0).toUpperCase()}</div>'">`
     : `<div class="lb-podium-initial">${con.fullname.charAt(0).toUpperCase()}</div>`;
-
+  const voteDisplay = showVotes ? `${(con.vote_count||0).toLocaleString()} votes` : '— votes hidden';
   return `
     <div class="lb-podium-card p1">
       <div class="lb-podium-img">
@@ -92,64 +114,61 @@ function podiumCard1st(con) {
       <div class="lb-podium-info">
         <div class="lb-podium-rank">1st — Gold</div>
         <div class="lb-podium-name">${con.fullname}</div>
-        <div class="lb-podium-votes">${(con.vote_count||0).toLocaleString()} votes</div>
+        <div class="lb-podium-votes">${voteDisplay}</div>
       </div>
     </div>`;
 }
 
-function podiumCard2nd3rd(con, rank) {
+function podiumCard2nd3rd(con, rank, showVotes) {
   const cls   = rank === 1 ? 'p2' : 'p3';
   const label = rank === 1 ? '2nd — Silver' : '3rd — Bronze';
   const img   = con.avatar_url
     ? `<img src="${con.avatar_url}" alt="${con.fullname}"
            onerror="this.outerHTML='<div class=\\'lb-podium-initial\\'>${con.fullname.charAt(0).toUpperCase()}</div>'">`
     : `<div class="lb-podium-initial">${con.fullname.charAt(0).toUpperCase()}</div>`;
-
+  const voteDisplay = showVotes ? `${(con.vote_count||0).toLocaleString()} votes` : '— votes hidden';
   return `
     <div class="lb-podium-card ${cls}">
       <div class="lb-podium-img">${img}</div>
       <div class="lb-podium-info">
         <div class="lb-podium-rank">${label}</div>
         <div class="lb-podium-name">${con.fullname}</div>
-        <div class="lb-podium-votes">${(con.vote_count||0).toLocaleString()} votes</div>
+        <div class="lb-podium-votes">${voteDisplay}</div>
       </div>
     </div>`;
 }
 
-function renderBlock(block) {
+function renderBlock(block, showVotes) {
   const all      = [...(block.podium||[]), ...(block.rest||[])];
-  const maxVotes = all[0]?.vote_count || 1;
+  const maxVotes = showVotes ? (all[0]?.vote_count || 1) : 1;
   const [first, second, third, ...remaining] = all;
   const next5    = remaining.slice(0, 5);
   const rest     = remaining.slice(5);
 
-  /* ── Top 3 ── */
   let podiumHtml = '';
   if (!first) {
     podiumHtml = `<p style="text-align:center;color:var(--text-muted,#5e7060);padding:1rem 0;">No nominees yet</p>`;
   } else {
     const subRow = (second || third)
       ? `<div class="lb-podium-row-sub">
-           ${second ? podiumCard2nd3rd(second, 1) : ''}
-           ${third  ? podiumCard2nd3rd(third,  2) : ''}
+           ${second ? podiumCard2nd3rd(second, 1, showVotes) : ''}
+           ${third  ? podiumCard2nd3rd(third,  2, showVotes) : ''}
          </div>`
       : '';
     podiumHtml = `
       <div class="lb-podium-row">
-        ${podiumCard1st(first)}
+        ${podiumCard1st(first, showVotes)}
         ${subRow}
       </div>`;
   }
 
-  /* ── Ranks 4-8 ── */
   const next5Html = next5.length
-    ? `<div class="lb-list-box">${next5.map((c,i)=>listRow(c,i+3,maxVotes)).join('')}</div>`
+    ? `<div class="lb-list-box">${next5.map((c,i)=>listRow(c,i+3,maxVotes,showVotes)).join('')}</div>`
     : '';
 
-  /* ── Rest (9+) ── */
   const restHtml = rest.length
     ? `<div class="lb-rest" id="rest-${block.category.slug}">
-         <div class="lb-list-box">${rest.map((c,i)=>listRow(c,i+8,maxVotes)).join('')}</div>
+         <div class="lb-list-box">${rest.map((c,i)=>listRow(c,i+8,maxVotes,showVotes)).join('')}</div>
        </div>
        <button class="lb-show-all-btn" onclick="toggleRest('${block.category.slug}',this)">
          Show all ${all.length} nominees
@@ -173,13 +192,48 @@ function renderBlock(block) {
 function toggleRest(slug, btn) {
   const el = document.getElementById('rest-' + slug);
   if (!el) return;
-
   el.classList.toggle('open');
+  btn.textContent = el.classList.contains('open') ? 'Hide full list' : 'Show full nominees';
+}
 
-  if (el.classList.contains('open')) {
-    btn.textContent = 'Hide full list';
-  } else {
-    btn.textContent = 'Show full nominees';
+function showBanner(meta) {
+  const banner = document.getElementById('lb-status-banner');
+  if (!banner) return;
+
+  if (meta?.revealed) {
+    banner.innerHTML = `
+      <div class="lb-banner lb-banner-revealed">
+        <span class="lb-banner-icon">🏆</span>
+        <span><strong>Final Results</strong> — Voting has ended. These are the official final standings.</span>
+      </div>`;
+    banner.style.display = 'block';
+    return;
+  }
+
+  if (meta?.live && meta?.settings) {
+    // Admin/mod seeing live data
+    banner.innerHTML = `
+      <div class="lb-banner lb-banner-live-admin">
+        <span class="lb-banner-icon">🔴</span>
+        <span><strong>Admin View — Live Standings</strong> &nbsp;|&nbsp;
+        Public is seeing: <strong>${meta.settings.frozen ? 'Frozen snapshot' : 'Live (unfrozen)'}</strong>
+        ${meta.settings.reveal_final ? ' · Final standings revealed to all' : ''}
+        </span>
+      </div>`;
+    banner.style.display = 'block';
+    return;
+  }
+
+  if (meta?.frozen) {
+    const since = meta.captured_at
+      ? new Date(meta.captured_at).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })
+      : 'earlier';
+    banner.innerHTML = `
+      <div class="lb-banner lb-banner-frozen">
+        <span class="lb-banner-icon">⏸️</span>
+        <span><strong>Standings paused</strong> — Voting is ongoing. These standings are as of <strong>${since}</strong>. Final results will be revealed when voting closes.</span>
+      </div>`;
+    banner.style.display = 'block';
   }
 }
 
@@ -193,7 +247,11 @@ async function loadLeaderboard() {
       throw new Error();
     }
 
-    container.innerHTML = r.data.data.map(renderBlock).join('');
+    showBanner(r.data._meta);
+    // showVotes = true only when: admin/mod (live+settings) OR final revealed to all
+    const meta = r.data._meta;
+    const showVotes = !!(meta?.revealed || (meta?.live && meta?.settings));
+    container.innerHTML = r.data.data.map(b => renderBlock(b, showVotes)).join('');
   } catch (e) {
     container.innerHTML = `
       <p style="text-align:center;color:#e03e3e;padding:2rem;">
@@ -206,8 +264,12 @@ async function loadLeaderboard() {
 document.addEventListener('DOMContentLoaded', () => {
   loadLeaderboard();
 
-  setInterval(() => {
-    loadLeaderboard();
+  // Only auto-refresh if not frozen (no point refreshing a frozen snapshot)
+  setInterval(async () => {
+    const r = await apiFetch('/voting/leaderboard').catch(() => null);
+    if (r?.data?._meta?.live) {
+      loadLeaderboard();
+    }
   }, 30000);
 });
 </script>

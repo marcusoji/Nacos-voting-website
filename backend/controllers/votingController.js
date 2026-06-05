@@ -35,7 +35,8 @@ exports.getCategoryBySlug = asyncHandler(async (req, res) => {
 });
 
 // ── GET /api/voting/leaderboard ──────────────────────────────
-exports.getLeaderboard = asyncHandler(async (req, res) => {
+// Helper: fetch live leaderboard data from DB
+async function fetchLiveLeaderboard() {
   const { data: categories, error } = await supabase.from('categories').select('*').order('name');
   if (error) throw error;
   const data = await Promise.all(categories.map(async (cat) => {
@@ -48,7 +49,59 @@ exports.getLeaderboard = asyncHandler(async (req, res) => {
     const all = contestants || [];
     return { category: cat, podium: all.slice(0, 3), rest: all.slice(3) };
   }));
-  res.json({ success: true, data });
+  return data;
+}
+
+// ── GET /api/voting/leaderboard ──────────────────────────────
+// Public: respects freeze/reveal settings
+// Admin/Moderator: always sees live data
+exports.getLeaderboard = asyncHandler(async (req, res) => {
+  const role = req.userRole; // set by optionalSession middleware
+  const isPrivileged = role === 'admin' || role === 'moderator';
+
+  // Fetch settings
+  const { data: settingRow } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'leaderboard_mode')
+    .single();
+
+  const settings = settingRow?.value || { frozen: false, reveal_final: false };
+
+  // Privileged users always get live data
+  if (isPrivileged) {
+    const data = await fetchLiveLeaderboard();
+    return res.json({ success: true, data, _meta: { live: true, settings } });
+  }
+
+  // Public: if reveal_final is true, show live (voting is over, results revealed)
+  if (settings.reveal_final) {
+    const data = await fetchLiveLeaderboard();
+    return res.json({ success: true, data, _meta: { live: true, revealed: true } });
+  }
+
+  // Public: if frozen, return snapshot
+  if (settings.frozen) {
+    const { data: snapRow } = await supabase
+      .from('leaderboard_snapshot')
+      .select('data, captured_at')
+      .order('captured_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (snapRow?.data) {
+      return res.json({
+        success: true,
+        data: snapRow.data,
+        _meta: { live: false, frozen: true, captured_at: snapRow.captured_at }
+      });
+    }
+    // No snapshot yet — fall through to live (shouldn't happen but safe fallback)
+  }
+
+  // Default: live
+  const data = await fetchLiveLeaderboard();
+  res.json({ success: true, data, _meta: { live: true } });
 });
 
 // ── POST /api/voting/initialize ──────────────────────────────

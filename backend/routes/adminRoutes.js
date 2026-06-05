@@ -32,4 +32,11 @@ router.get('/transactions', ...isAdmin, admin.getTransactions);
 router.post('/transactions/:ref/force-approve', ...isAdmin, admin.forceApproveTransaction);
 router.delete('/transactions/:ref', ...isAdmin, admin.deleteTransaction);
 
+// Leaderboard freeze controls (admin only)
+router.get('/leaderboard/settings',       ...isMod,   admin.getLeaderboardSettings);
+router.post('/leaderboard/freeze',        ...isAdmin, admin.freezeLeaderboard);
+router.post('/leaderboard/unfreeze',      ...isAdmin, admin.unfreezeLeaderboard);
+router.post('/leaderboard/reveal-final',  ...isAdmin, admin.revealFinalStandings);
+router.post('/leaderboard/hide-final',    ...isAdmin, admin.hideFinalStandings);
+
 module.exports = router;

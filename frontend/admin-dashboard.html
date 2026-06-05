@@ -35,6 +35,9 @@
       <button class="dash-nav-item" onclick="showPanel('transactions')" id="nav-transactions">
         <span class="nav-icon">💳</span> Transactions
       </button>
+      <button class="dash-nav-item" onclick="showPanel('leaderboard')" id="nav-leaderboard">
+        <span class="nav-icon">🏆</span> Leaderboard
+      </button>
     </div>
     <div class="dash-sidebar-title">Account</div>
     <button class="dash-nav-item" onclick="Auth.logout()">
@@ -192,6 +195,73 @@
       </div>
     </div>
 
+    <!-- ── Leaderboard Control Panel ── -->
+    <div id="panel-leaderboard" class="panel-hidden">
+      <div class="dash-panel">
+        <div class="dash-panel-title">🏆 Leaderboard Control</div>
+
+        <!-- Current status card -->
+        <div id="lb-ctrl-status" style="background:rgba(201,161,74,.08);border:1px solid rgba(201,161,74,.25);border-radius:10px;padding:1.2rem 1.4rem;margin-bottom:1.5rem;">
+          <div style="font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#5e7060);margin-bottom:.5rem;">Current Status</div>
+          <div id="lb-status-text" style="font-size:1rem;font-weight:600;color:var(--text,#f0f4f1);">Loading…</div>
+          <div id="lb-snapshot-time" style="font-size:.78rem;color:var(--text-muted,#5e7060);margin-top:.3rem;"></div>
+        </div>
+
+        <!-- Action buttons -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem;">
+
+          <div style="background:var(--surface,#1a2e1c);border:1px solid var(--border,#2a3d2c);border-radius:10px;padding:1.2rem;">
+            <div style="font-weight:600;margin-bottom:.4rem;color:var(--text,#f0f4f1);">⏸️ Freeze Standings</div>
+            <div style="font-size:.8rem;color:var(--text-muted,#5e7060);margin-bottom:.9rem;">
+              Takes a snapshot of current standings right now and shows it to the public. Votes keep counting but public sees the frozen snapshot. You and moderators always see live.
+            </div>
+            <button class="btn btn-secondary" onclick="lbFreeze()" id="btn-freeze">Freeze Now</button>
+          </div>
+
+          <div style="background:var(--surface,#1a2e1c);border:1px solid var(--border,#2a3d2c);border-radius:10px;padding:1.2rem;">
+            <div style="font-weight:600;margin-bottom:.4rem;color:var(--text,#f0f4f1);">▶️ Unfreeze Standings</div>
+            <div style="font-size:.8rem;color:var(--text-muted,#5e7060);margin-bottom:.9rem;">
+              Removes the freeze. Public sees live standings again. Use this if you want to revert to a normal state while voting is still going.
+            </div>
+            <button class="btn btn-secondary" onclick="lbUnfreeze()" id="btn-unfreeze">Unfreeze</button>
+          </div>
+
+        </div>
+
+        <div style="border-top:1px solid var(--border,#2a3d2c);padding-top:1.5rem;margin-bottom:1.5rem;">
+          <div style="font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#5e7060);margin-bottom:1rem;">Final Results Control</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+
+            <div style="background:rgba(59,195,112,.07);border:1px solid rgba(59,195,112,.25);border-radius:10px;padding:1.2rem;">
+              <div style="font-weight:600;margin-bottom:.4rem;color:#3bc370;">🎉 Reveal Final Standings</div>
+              <div style="font-size:.8rem;color:var(--text-muted,#5e7060);margin-bottom:.9rem;">
+                Voting is over. Show everyone the real final standings with a "Final Results" banner. This is the last step.
+              </div>
+              <button class="btn" style="background:#3bc370;color:#0d1a0f;" onclick="lbReveal()" id="btn-reveal">Reveal to Everyone</button>
+            </div>
+
+            <div style="background:rgba(224,62,62,.07);border:1px solid rgba(224,62,62,.2);border-radius:10px;padding:1.2rem;">
+              <div style="font-weight:600;margin-bottom:.4rem;color:#e03e3e;">🔒 Hide Final Standings</div>
+              <div style="font-size:.8rem;color:var(--text-muted,#5e7060);margin-bottom:.9rem;">
+                Pull back the reveal — re-freezes the leaderboard so public sees the snapshot again. Use if you revealed too early.
+              </div>
+              <button class="btn btn-danger" onclick="lbHide()" id="btn-hide">Hide Again</button>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Live preview link -->
+        <div style="text-align:center;padding:.5rem 0;">
+          <a href="leaderboard.html" target="_blank" style="color:#C9A14A;font-size:.85rem;text-decoration:none;">
+            🔗 Open Leaderboard Page (your view = live) →
+          </a>
+        </div>
+
+        <div id="lb-ctrl-msg" style="display:none;margin-top:1rem;padding:.8rem 1rem;border-radius:8px;font-size:.85rem;"></div>
+      </div>
+    </div>
+
   </main>
 </div>
 </div>
@@ -204,7 +274,7 @@ const currentUser = Auth.getUser();
 document.getElementById('dash-user-name').textContent = `Welcome, ${currentUser?.fullname || 'Admin'}`;
 
 // ── Panel switching ────────────────────────────────────────
-const PANELS = ['analytics','categories','contestants','users','transactions'];
+const PANELS = ['analytics','categories','contestants','users','transactions','leaderboard'];
 function showPanel(name) {
   PANELS.forEach(p => {
     document.getElementById(`panel-${p}`).classList.toggle('panel-hidden', p !== name);
@@ -215,6 +285,7 @@ function showPanel(name) {
   if (name === 'contestants')  { loadCategories(); loadContestants(); }
   if (name === 'users')        loadUsers();
   if (name === 'transactions') loadAllTransactions();
+  if (name === 'leaderboard')  loadLbSettings();
 }
 
 // ── Analytics ─────────────────────────────────────────────
@@ -565,6 +636,106 @@ async function deleteTx(btn) {
     Toast.error('Error', 'Network error.');
     btn.disabled = false; btn.textContent = orig;
   }
-}</script>
+}
+
+// ── Leaderboard Controls ───────────────────────────────────
+
+function lbShowMsg(msg, isError = false) {
+  const el = document.getElementById('lb-ctrl-msg');
+  if (!el) return;
+  el.style.display = 'block';
+  el.style.background = isError ? 'rgba(224,62,62,.12)' : 'rgba(59,195,112,.1)';
+  el.style.border = isError ? '1px solid rgba(224,62,62,.3)' : '1px solid rgba(59,195,112,.3)';
+  el.style.color = isError ? '#e03e3e' : '#3bc370';
+  el.textContent = msg;
+  setTimeout(() => { el.style.display = 'none'; }, 5000);
+}
+
+async function loadLbSettings() {
+  const statusText = document.getElementById('lb-status-text');
+  const snapTime   = document.getElementById('lb-snapshot-time');
+  try {
+    const r = await apiFetch('/admin/leaderboard/settings');
+    if (!r.ok) throw new Error();
+    const { settings, snapshot_captured_at } = r.data;
+
+    let label = '';
+    if (settings.reveal_final) {
+      label = '🎉 Final standings REVEALED to everyone';
+    } else if (settings.frozen) {
+      label = '⏸️ FROZEN — public sees snapshot, you see live';
+    } else {
+      label = '▶️ LIVE — everyone sees real-time standings';
+    }
+    statusText.textContent = label;
+
+    if (snapshot_captured_at) {
+      const d = new Date(snapshot_captured_at).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+      snapTime.textContent = `Last snapshot taken: ${d}`;
+    } else {
+      snapTime.textContent = 'No snapshot taken yet.';
+    }
+  } catch {
+    statusText.textContent = 'Could not load settings.';
+  }
+}
+
+async function lbAction(endpoint, confirmMsg, successMsg, btnId) {
+  if (!confirm(confirmMsg)) return;
+  const btn = document.getElementById(btnId);
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Working…';
+  try {
+    const r = await apiFetch(`/admin/leaderboard/${endpoint}`, { method: 'POST' });
+    if (r.ok) {
+      Toast.success('Done', successMsg);
+      lbShowMsg(successMsg);
+      await loadLbSettings();
+    } else {
+      lbShowMsg(r.data?.message || 'Action failed.', true);
+    }
+  } catch {
+    lbShowMsg('Network error.', true);
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+function lbFreeze() {
+  lbAction(
+    'freeze',
+    'Freeze the leaderboard now?\n\nThis will capture a snapshot of current standings and show it to the public. Votes will keep counting, but only you and moderators will see the live standings.',
+    'Leaderboard frozen. Public now sees the snapshot.',
+    'btn-freeze'
+  );
+}
+
+function lbUnfreeze() {
+  lbAction(
+    'unfreeze',
+    'Unfreeze the leaderboard?\n\nPublic will see live standings again.',
+    'Leaderboard unfrozen. Public sees live standings.',
+    'btn-unfreeze'
+  );
+}
+
+function lbReveal() {
+  lbAction(
+    'reveal-final',
+    '🎉 Reveal final standings to EVERYONE?\n\nThis will show all users the real final results with a "Final Results" banner. Only do this after voting is fully closed.',
+    'Final standings revealed to all users!',
+    'btn-reveal'
+  );
+}
+
+function lbHide() {
+  lbAction(
+    'hide-final',
+    'Hide the final standings again?\n\nPublic will go back to seeing the frozen snapshot.',
+    'Final standings hidden. Public sees snapshot again.',
+    'btn-hide'
+  );
+}
+</script>
 </body>
 </html>
