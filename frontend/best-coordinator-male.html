@@ -158,7 +158,7 @@ function renderSlides() {
           <div class="con-swipe-name">${con.fullname}</div>
           <div class="con-swipe-bio">${con.bio || 'No bio provided.'}</div>
           <div class="con-swipe-votes">0 votes</div>
-          <button class="con-swipe-vote-btn" onclick="window.location.href='voting-closed.html'">Vote</button>
+          <button class="con-swipe-vote-btn" onclick="vmOpen(${i})">Vote</button>
         </div>
       </div>
     </div>`).join('');
