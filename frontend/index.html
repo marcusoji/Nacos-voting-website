@@ -109,23 +109,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   try {
-  const lb = await apiFetch('/voting/leaderboard');   // ← was '/leaderboard'
-  if (lb.ok && lb.data.data) {
-    let contestants = 0, votes = 0;
-    lb.data.data.forEach(b => {
-      const all = [...(b.podium||[]), ...(b.rest||[])];
-      contestants += all.length;
-      all.forEach(c => votes += (c.vote_count || 0));
-    });
+    const lb = await apiFetch('/voting/stats');
+    if (lb.ok && lb.data) {
+      const contestants = lb.data.totalContestants;
+      const votes       = lb.data.totalVotes;
 
-    const ce = document.getElementById('stat-contestants');
-    const ve = document.getElementById('stat-votes');
+      const ce = document.getElementById('stat-contestants');
+      const ve = document.getElementById('stat-votes');
 
-    if (ce) { ce.dataset.count = contestants; ce.textContent = contestants; }
-    if (ve) { ve.dataset.count = votes;        ve.textContent = votes; }
+      if (ce) { ce.dataset.count = contestants; ce.textContent = contestants; }
+      if (ve) { ve.dataset.count = votes;        ve.textContent = votes; }
 
-    initCounters(); // ← moved inside here, after data-count is written
-  }
+      initCounters();
+    }
   } catch(e) {}
 });
 </script>

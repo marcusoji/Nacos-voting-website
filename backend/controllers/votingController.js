@@ -18,6 +18,19 @@ exports.getCategories = asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 });
 
+// ── GET /api/voting/stats ────────────────────────────────────
+// Always returns LIVE totals (used by index page counter).
+// Never frozen — freeze only affects the leaderboard display.
+exports.getStats = asyncHandler(async (req, res) => {
+  const { data, error } = await supabase
+    .from('contestants')
+    .select('vote_count');
+  if (error) throw error;
+  const totalVotes       = (data || []).reduce((sum, c) => sum + (c.vote_count || 0), 0);
+  const totalContestants = (data || []).length;
+  res.json({ success: true, totalVotes, totalContestants });
+});
+
 // ── GET /api/voting/categories/:slug ────────────────────────
 exports.getCategoryBySlug = asyncHandler(async (req, res) => {
   const { slug } = req.params;

@@ -5,6 +5,7 @@ const { optionalSession } = require('../middleware/auth');
 const { paymentLimiter }  = require('../middleware/rateLimiter');
 
 router.get('/categories',         vc.getCategories);
+router.get('/stats',              vc.getStats);
 router.get('/categories/:slug',   vc.getCategoryBySlug);
 router.get('/leaderboard',        optionalSession, vc.getLeaderboard);
 
