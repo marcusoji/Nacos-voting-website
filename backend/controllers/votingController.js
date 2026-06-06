@@ -42,7 +42,7 @@ exports.getCategoryBySlug = asyncHandler(async (req, res) => {
     .from('contestants')
     .select('id, fullname, avatar_url, bio, vote_count')
     .eq('category_id', category.id)
-    .order('vote_count', { ascending: false });
+    .order('id', { ascending: true });
   if (conErr) throw conErr;
   res.json({ success: true, category, contestants: contestants || [] });
 });
